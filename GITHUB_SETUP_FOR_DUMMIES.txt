@@ -1,0 +1,40 @@
+KIVO + GITHUB AUTO UPDATE — SIMPLE SETUP
+
+YOUR GITHUB REPOSITORY
+kumaylalrahal2009-debug/Kivo-Updates
+
+FIRST-TIME SETUP
+1. Open the Kivo-Updates repository on GitHub.
+2. Remove the old test folders/files you uploaded there.
+3. Extract Kivo_GitHub_Repo_Starter.zip on your PC.
+4. In the GitHub repo, click Add file > Upload files.
+5. Drag ALL CONTENTS of the extracted folder onto GitHub.
+   Important: upload the CONTENTS, not one wrapper folder.
+6. Commit the files to main.
+7. Click the Actions tab.
+8. If GitHub asks you to enable Actions, enable them.
+9. The workflow called "Publish Kivo Update" will run automatically.
+10. When it finishes, click Releases on the right.
+    You should see a release such as Kivo 1.0.1 with Kivo-update.zip attached.
+
+FROM THEN ON
+1. Change files in GitHub.
+2. Press Commit changes.
+3. GitHub automatically creates the next Kivo release.
+4. Installed Kivo apps check GitHub on startup and every 10 minutes.
+5. In Kivo Settings, the user sees Update now.
+6. Clicking Update now downloads the release, preserves data/, installs it, and restarts Kivo.
+
+HOW CHANGES ARE DOCUMENTED
+- Every GitHub commit is saved in repository History.
+- Every update gets a separate GitHub Release.
+- GitHub automatically generates release notes for the release.
+- Old releases stay available so you can see what changed in each version.
+
+NEVER UPLOAD
+- data/
+- kivo.db
+- uploads/
+- .env
+- passwords
+- API keys

@@ -1,0 +1,13 @@
+services:
+  kivo:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      KIVO_ADMIN_EMAIL: "owner@example.com"
+      KIVO_ADMIN_PASSWORD: "CHANGE-THIS-BEFORE-DEPLOY"
+      SECURE_COOKIES: "false"
+    volumes:
+      - kivo-data:/data
+volumes:
+  kivo-data:

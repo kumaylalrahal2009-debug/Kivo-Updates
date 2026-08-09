@@ -1,0 +1,10 @@
+{
+  "name": "Kivo — Life, handled.",
+  "short_name": "Kivo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09111f",
+  "theme_color": "#0c1222",
+  "description": "Personal life admin with a premium mobile interface.",
+  "icons": [{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
