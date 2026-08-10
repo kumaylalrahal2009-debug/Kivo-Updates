@@ -47,6 +47,7 @@ jobs:
             "start-kivo.bat",
             "start-admin.bat",
             "apply-update.ps1",
+            "business-config.example.bat",
             "Dockerfile",
             "docker-compose.yml",
             "README.txt",
