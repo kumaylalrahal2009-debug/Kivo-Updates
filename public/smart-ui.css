@@ -1,0 +1,35 @@
+html,body,button,input,textarea,select{font-family:"Segoe UI Variable Text","Segoe UI Variable","Aptos","Segoe UI",system-ui,-apple-system,BlinkMacSystemFont,sans-serif!important}
+body{font-feature-settings:"ss01" 1,"cv01" 1;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+h1,h2,h3,.brand,.brand-lockup b,.brief-title,.admin-header h1,.auth-card h1{font-family:"Segoe UI Variable Display","Segoe UI Variable","Aptos Display","Segoe UI",system-ui,sans-serif!important;letter-spacing:-.035em!important;font-weight:720!important}
+p,small,.item-copy p,.brief-sub,.subbrand{letter-spacing:-.006em;line-height:1.48}
+.kicker{letter-spacing:.14em!important;font-weight:760!important}
+.app-main{letter-spacing:-.008em}
+.hero-block h1{line-height:1.03!important;font-weight:760!important}
+.hero-block p{font-size:15px;line-height:1.5}
+.item-copy strong{font-weight:690;letter-spacing:-.017em;font-size:15.5px}
+.item-copy p{font-size:13px;opacity:.92}
+.amount-tag{font-weight:720;letter-spacing:-.02em}
+button{font-weight:650;letter-spacing:-.012em}
+
+#askView .hero-block{position:relative;padding-bottom:8px}
+.smart-badge{display:inline-flex;align-items:center;gap:7px;width:max-content;margin-top:10px;padding:7px 10px;border-radius:999px;border:1px solid rgba(133,149,255,.22);background:rgba(114,128,255,.09);color:#cfd6ff;font-size:11px;font-weight:720;letter-spacing:.01em}
+.smart-badge span{font-size:12px;color:#98a7ff}
+.chat-shell{gap:12px!important;padding-bottom:12px}
+.bubble{font-size:14px!important;line-height:1.5!important;letter-spacing:-.009em!important}
+.bubble.kivo{max-width:91%!important;padding:14px 16px!important;border-radius:20px 20px 20px 7px!important;background:linear-gradient(145deg,rgba(35,45,64,.98),rgba(29,38,55,.98))!important;border:1px solid rgba(255,255,255,.09)!important;color:#f1f4fb!important;box-shadow:0 8px 26px rgba(0,0,0,.14);white-space:pre-wrap}
+.bubble.user{max-width:84%!important;padding:12px 15px!important;border-radius:19px 19px 7px 19px!important;box-shadow:0 8px 22px rgba(68,83,255,.17)}
+.smart-reply{animation:kivoReplyIn .22s ease-out}
+@keyframes kivoReplyIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.ask-box{padding:9px!important;border-radius:20px!important;background:rgba(255,255,255,.055)!important;border:1px solid rgba(255,255,255,.1)!important;box-shadow:0 12px 32px rgba(0,0,0,.12)}
+.ask-box input{font-size:15px!important;letter-spacing:-.012em!important}
+.ask-box input::placeholder,#captureText::placeholder{color:#8490a8!important;opacity:1}
+.send-btn{width:44px!important;height:44px!important;border-radius:15px!important;font-size:19px!important}
+.chip-row{gap:8px!important}
+.chip-row button{font-size:11.5px!important;padding:9px 11px!important;border-radius:999px!important;background:rgba(255,255,255,.045)!important;border:1px solid rgba(255,255,255,.08)!important;color:#c9d2e5!important}
+.capture-card textarea{font-size:15px!important;line-height:1.5!important;letter-spacing:-.01em!important}
+
+.glass-card,.item-card,.brief-card,.capture-card,.money-hero,.handled-banner{backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.summary-card strong,.money-hero strong,.metric-card strong{letter-spacing:-.035em!important;font-weight:730!important}
+.type-chip,.duedate-chip,.repeat-chip,.state-chip,.badge-light{font-weight:680!important;letter-spacing:.01em!important}
+
+@media(max-width:560px){.bubble.kivo{max-width:94%!important}.bubble.user{max-width:88%!important}.hero-block h1{letter-spacing:-.042em!important}}
