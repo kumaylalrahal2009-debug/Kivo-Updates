@@ -1,1 +1,1 @@
-PLACEHOLDER
+const http = require('node:http');
