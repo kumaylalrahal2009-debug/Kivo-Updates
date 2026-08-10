@@ -28,8 +28,10 @@ jobs:
           node --check server.js
           node --check bootstrap.js
           node --check experience.js
+          node --check smart-experience.js
           node --check public/app.js
           node --check public/premium.js
+          node --check public/smart-client.js
 
       - name: Build update package
         shell: pwsh
@@ -43,6 +45,7 @@ jobs:
             "server.js",
             "bootstrap.js",
             "experience.js",
+            "smart-experience.js",
             "public",
             "start-kivo.bat",
             "start-admin.bat",
