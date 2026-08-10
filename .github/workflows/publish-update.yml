@@ -1,0 +1,69 @@
+name: Publish Kivo Update
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "data/**"
+      - "uploads/**"
+      - "updates/**"
+      - "backups/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - name: Get Kivo source
+        uses: actions/checkout@v4
+
+      - name: Build update package
+        shell: pwsh
+        run: |
+          $version = "1.0.${{ github.run_number }}"
+          $tag = "v$version"
+
+          New-Item -ItemType Directory -Force -Path dist\package | Out-Null
+
+          $items = @(
+            "server.js",
+            "public",
+            "start-kivo.bat",
+            "start-admin.bat",
+            "apply-update.ps1",
+            "Dockerfile",
+            "docker-compose.yml",
+            "README.txt"
+          )
+
+          foreach ($item in $items) {
+            if (Test-Path $item) {
+              Copy-Item $item dist\package -Recurse -Force
+            }
+          }
+
+          @{
+            version = $version
+            update_repo = "${{ github.repository }}"
+            release = $tag
+          } | ConvertTo-Json | Set-Content dist\package\version.json -Encoding UTF8
+
+          Compress-Archive -Path dist\package\* -DestinationPath dist\Kivo-update.zip -Force
+
+          "KIVO_VERSION=$version" >> $env:GITHUB_ENV
+          "KIVO_TAG=$tag" >> $env:GITHUB_ENV
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$env:KIVO_TAG" "dist/Kivo-update.zip#Kivo update package" `
+            --title "Kivo $env:KIVO_VERSION" `
+            --generate-notes `
+            --latest
