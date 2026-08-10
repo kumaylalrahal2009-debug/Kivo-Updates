@@ -29,7 +29,7 @@ function send(res,status,obj){res.writeHead(status,{'Content-Type':'application/
 function maybeBackup(){try{const source=path.join(DATA,'kivo.db');if(!fs.existsSync(source))return;const latest=fs.readdirSync(BACKUPS).filter(x=>x.endsWith('.db')).sort().pop();if(latest){const age=Date.now()-fs.statSync(path.join(BACKUPS,latest)).mtimeMs;if(age<24*3600*1000)return;}const stamp=new Date().toISOString().replace(/[:.]/g,'-');fs.copyFileSync(source,path.join(BACKUPS,`kivo-${stamp}.db`));const files=fs.readdirSync(BACKUPS).filter(x=>x.endsWith('.db')).sort();while(files.length>7){fs.unlinkSync(path.join(BACKUPS,files.shift()));}}catch(err){console.warn('Kivo backup:',err.message)}}
 maybeBackup();
 
-const childEnv={...process.env,PORT:String(BILLING_PORT),KIVO_CORE_PORT:String(CORE_PORT),KIVO_DATA_DIR:DATA,KIVO_UPLOAD_DIR:UPLOADS};
+const childEnv={...process.env,PORT:String(BILLING_PORT),KIVO_CORE_PORT:String(CORE_PORT),KIVO_DATA_DIR:DATA,KIVO_UPLOAD_DIR:UPLOADS,KIVO_PUBLIC_URL:process.env.KIVO_PUBLIC_URL||`http://localhost:${PORT}`};
 const child=spawn(process.execPath,['--no-warnings',path.join(ROOT,'bootstrap.js')],{cwd:ROOT,env:childEnv,stdio:['ignore','inherit','inherit']});
 child.on('exit',code=>{console.log(`Kivo services exited (${code??0}); closing experience layer.`);process.exit(code??0)});
 
