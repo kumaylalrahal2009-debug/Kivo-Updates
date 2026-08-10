@@ -22,7 +22,7 @@ jobs:
       - name: Get Kivo source
         uses: actions/checkout@v4
 
-      - name: Validate JavaScript
+      - name: Validate Kivo Smart Experience
         shell: pwsh
         run: |
           node --check server.js
