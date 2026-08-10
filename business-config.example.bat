@@ -2,6 +2,11 @@
 REM Copy this file to business-config.bat and fill it in locally/on your server.
 REM NEVER upload business-config.bat to GitHub.
 
+REM OPTIONAL: connect Kivo to a cloud language model for the smartest Ask Kivo experience.
+REM Leave these blank to use Kivo's improved local intelligence engine instead.
+set "OPENAI_API_KEY="
+set "KIVO_AI_MODEL=gpt-5-mini"
+
 REM Stripe secret API key for the business receiving payments.
 set "STRIPE_SECRET_KEY=sk_test_REPLACE_ME"
 
