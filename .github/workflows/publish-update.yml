@@ -22,6 +22,15 @@ jobs:
       - name: Get Kivo source
         uses: actions/checkout@v4
 
+      - name: Validate JavaScript
+        shell: pwsh
+        run: |
+          node --check server.js
+          node --check bootstrap.js
+          node --check experience.js
+          node --check public/app.js
+          node --check public/premium.js
+
       - name: Build update package
         shell: pwsh
         run: |
@@ -32,13 +41,16 @@ jobs:
 
           $items = @(
             "server.js",
+            "bootstrap.js",
+            "experience.js",
             "public",
             "start-kivo.bat",
             "start-admin.bat",
             "apply-update.ps1",
             "Dockerfile",
             "docker-compose.yml",
-            "README.txt"
+            "README.txt",
+            "BILLING_SETUP.md"
           )
 
           foreach ($item in $items) {
