@@ -1,0 +1,134 @@
+name: Upgrade Ask Kivo Intelligence
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/smart-ask-upgrade.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore known-good core and upgrade Ask Kivo
+        shell: python
+        run: |
+          import subprocess
+          from pathlib import Path
+
+          # Restore the complete known-good core from the last verified release.
+          original = subprocess.check_output(["git","show","v1.0.15:server.js"], text=True)
+
+          old = '''  if(req.method==='POST'&&url.pathname==='/api/ask'){
+    const s=requireAuth(req,res);if(!s)return;const b=await readJson(req);if(!requireCsrf(req,res,s,b))return;const q=String(b.q||'').toLowerCase();const all=getItems(s.user_id),open=all.filter(x=>x.status==='open');let answer='';
+    if(/tomorrow|next payment|next charge|renew/.test(q)){
+      const tomorrow=localISO(new Date(Date.now()+86400000));const arr=open.filter(x=>x.due_date===tomorrow);answer=arr.length?`Tomorrow you have ${arr.map(x=>`${x.title}${x.amount!=null?` for A$${Number(x.amount).toFixed(2)}`:''}`).join('; ')}.`:'I do not have anything saved as due tomorrow.';
+    } else if(/pay|money|subscription|spend|charge/.test(q)){
+      const arr=open.filter(x=>x.amount!=null),total=arr.reduce((a,x)=>a+Number(x.amount||0),0);answer=arr.length?`You have ${arr.length} upcoming charge${arr.length===1?'':'s'} totalling A$${total.toFixed(2)}. ${arr.slice(0,5).map(x=>`${x.title} (A$${Number(x.amount).toFixed(2)}${x.due_date?`, ${x.due_date}`:''}${x.recurrence?`, ${x.recurrence}`:''})`).join('; ')}.`:`I don't have any upcoming charges saved.`;
+    } else if(/deadline|due|expire|return/.test(q)){
+      const arr=open.filter(x=>x.category==='deadline');answer=arr.length?`You have ${arr.length} deadline item${arr.length===1?'':'s'}: ${arr.slice(0,5).map(x=>`${x.title} — ${x.due_date||'date not set'}`).join('; ')}.`:'No open deadlines are saved.';
+    } else if(/today|week|need|\\bdo\\b/.test(q)){
+      const reminders=reminderRows(s.user_id);answer=reminders.length?`The most important right now: ${reminders.slice(0,5).map(x=>`${x.title} — ${x.urgency}${x.amount!=null?` (A$${Number(x.amount).toFixed(2)})`:''}`).join('; ')}.`:(open.length?`You have ${open.length} open item${open.length===1?'':'s'}: ${open.slice(0,6).map(x=>x.title).join(', ')}.`:`You're clear right now.`);
+    } else {
+      const words=q.match(/[a-z0-9]+/g)?.filter(w=>w.length>2)||[];const matches=all.filter(x=>words.some(w=>(x.title+' '+(x.notes||'')).toLowerCase().includes(w)));answer=matches.length?'I found: '+matches.slice(0,5).map(x=>`${x.title}${x.due_date?' — '+x.due_date:''}${x.amount!=null?' — A$'+Number(x.amount).toFixed(2):''}`).join('; ')+'.':`I couldn't find a matching saved item.`;
+    }
+    trackEvent(s.user_id,'ask'); return json(res,200,{answer});
+  }'''
+
+          new = r'''  if(req.method==='POST'&&url.pathname==='/api/ask'){
+    const s=requireAuth(req,res);if(!s)return;const b=await readJson(req);if(!requireCsrf(req,res,s,b))return;
+    const raw=String(b.q||'').trim();const q=raw.toLowerCase();const all=getItems(s.user_id),open=all.filter(x=>x.status==='open');
+    const today=localISO();
+    const dated=open.filter(x=>x.due_date).map(x=>({...x,days:daysBetween(today,x.due_date)})).sort((a,b)=>a.days-b.days);
+    const money=open.filter(x=>x.amount!=null).sort((a,b)=>(a.due_date||'9999').localeCompare(b.due_date||'9999'));
+    const urgent=dated.filter(x=>x.days<=7);
+    const overdue=dated.filter(x=>x.days<0);
+    const tomorrow=dated.filter(x=>x.days===1);
+    const subscriptions=money.filter(x=>x.recurrence);
+    const fmtDate=(iso)=>{if(!iso)return '';const d=localDate(iso);return d.toLocaleDateString('en-AU',{day:'numeric',month:'short'});};
+    const moneyText=x=>`A$${Number(x.amount||0).toFixed(2)}`;
+    const itemText=x=>`${x.title}${x.amount!=null?` (${moneyText(x)})`:''}${x.due_date?` on ${fmtDate(x.due_date)}`:''}`;
+    let answer='';
+
+    // Conversational greetings should feel like an assistant, not a database search.
+    if(/^(hi|hey|hello|yo|sup|good morning|good afternoon|good evening)[!. ]*$/.test(q)){
+      if(overdue.length) answer=`Hey. You’ve got ${overdue.length} overdue item${overdue.length===1?'':'s'} I’d deal with first — ${itemText(overdue[0])}. Want me to run through the rest?`;
+      else if(tomorrow.length) answer=`Hey. The main thing I’d keep in mind is ${itemText(tomorrow[0])} tomorrow. Other than that, nothing looks immediately urgent.`;
+      else if(urgent.length) answer=`Hey. You’re in pretty good shape. The next thing coming up is ${itemText(urgent[0])}.`;
+      else answer=`Hey. Nothing looks urgent right now. Ask me what you need to do, what’s coming up, or what you’re paying for and I’ll sort it out.`;
+    }
+    // “What do I need to do?” means prioritise and advise, not dump every saved title.
+    else if(/what (do|should) i (need to )?do|what needs (my )?attention|what'?s important|prioriti[sz]e|focus on|what am i forgetting|anything urgent/.test(q)){
+      if(overdue.length){
+        const first=overdue[0];answer=`Start with ${first.title}${first.amount!=null?` — ${moneyText(first)}`:''}. It’s overdue, so that’s the one I’d clear first.`;
+        if(urgent.length>overdue.length){const next=urgent.find(x=>x.days>=0);if(next)answer+=` After that, keep ${next.title} in mind${next.days===0?' today':next.days===1?' for tomorrow':` for ${fmtDate(next.due_date)}`}.`;}
+      }else if(tomorrow.length){
+        answer=`You don’t have anything overdue. The main thing to be ready for is ${itemText(tomorrow[0])} tomorrow.`;
+        if(tomorrow.length>1)answer+=` There ${tomorrow.length===2?'is':'are'} ${tomorrow.length-1} other item${tomorrow.length-1===1?'':'s'} due tomorrow too.`;
+      }else if(urgent.length){
+        const x=urgent[0];answer=`Nothing is on fire. Your next priority is ${x.title}${x.days===0?' today':` on ${fmtDate(x.due_date)}`}${x.amount!=null?` for ${moneyText(x)}`:''}.`;
+      }else if(open.length){
+        answer=`Nothing looks urgent. You have ${open.length} open item${open.length===1?'':'s'}, but none of the dated ones need immediate attention.`;
+      }else answer=`You’re clear — I don’t have anything that needs your attention right now.`;
+    }
+    // Money questions distinguish recurring bills from every random money item and avoid ugly database-style output.
+    else if(/what am i paying for|subscriptions?|recurring (payments?|charges?|bills?)|monthly (payments?|bills?)|what gets charged/.test(q)){
+      if(!subscriptions.length) answer=`I don’t have any recurring subscriptions saved for you yet.`;
+      else {
+        const monthly=subscriptions.filter(x=>x.recurrence==='monthly').reduce((n,x)=>n+Number(x.amount||0),0);
+        answer=`You’ve got ${subscriptions.length} recurring payment${subscriptions.length===1?'':'s'} saved`+(monthly?`, about A$${monthly.toFixed(2)} a month from the monthly ones.`:'.');
+        const next=subscriptions[0];if(next)answer+=` The next one is ${itemText(next)}.`;
+        if(subscriptions.length>1)answer+=` I can also break down the full list if you want.`;
+      }
+    }
+    else if(/tomorrow|next payment|next charge|what'?s next|coming up next|renew/.test(q)){
+      const next=dated[0];
+      if(!next)answer=`I don’t have anything dated coming up right now.`;
+      else if(next.days<0)answer=`Before the next thing, you’ve got something overdue: ${itemText(next)}. I’d handle that first.`;
+      else if(next.days===0)answer=`The next thing is today: ${itemText(next)}.`;
+      else if(next.days===1)answer=`Tomorrow, you’ve got ${itemText(next)}.`;
+      else answer=`Your next dated item is ${itemText(next)}.`;
+    }
+    else if(/how much|spend|charges?|bills?|money|paying/.test(q)){
+      if(!money.length)answer=`I don’t have any upcoming payments saved right now.`;
+      else {const total=money.reduce((n,x)=>n+Number(x.amount||0),0);const next=money[0];answer=`You have ${money.length} upcoming payment${money.length===1?'':'s'} saved, totalling ${moneyText({amount:total})}. The next is ${itemText(next)}.`;}
+    }
+    else if(/deadline|due|expire|return/.test(q)){
+      const deadlines=dated.filter(x=>x.category==='deadline');
+      if(!deadlines.length)answer=`You don’t have any open deadlines saved.`;
+      else {const x=deadlines[0];answer=x.days<0?`${x.title} is overdue. I’d deal with that first.`:x.days===0?`${x.title} is due today.`:`Your next deadline is ${x.title} on ${fmtDate(x.due_date)}.`;}
+    }
+    else {
+      const stop=new Set(['what','when','where','which','that','this','with','have','does','from','your','about','tell','show','find','please','could','would','there','anything']);
+      const words=(q.match(/[a-z0-9]+/g)||[]).filter(w=>w.length>2&&!stop.has(w));
+      const matches=all.map(x=>{const hay=(x.title+' '+(x.notes||'')+' '+(x.category||'')).toLowerCase();const score=words.reduce((n,w)=>n+(hay.includes(w)?1:0),0);return {x,score};}).filter(r=>r.score>0).sort((a,b)=>b.score-a.score);
+      if(matches.length){const x=matches[0].x;answer=`I found ${x.title}.`+(x.status!=='open'?` It’s currently marked ${x.status}.`:'')+(x.due_date?` It’s set for ${fmtDate(x.due_date)}.`:'')+(x.amount!=null?` The amount is ${moneyText(x)}.`:'');}
+      else if(open.length){
+        const next=dated[0];answer=next?`I’m not seeing a saved item that directly matches that. The next thing on your plate is ${itemText(next)}. If you meant something else, say it naturally and I’ll work from your saved stuff.`:`I’m not seeing a saved item that directly matches that. You do have ${open.length} open item${open.length===1?'':'s'}, but none has a date attached.`;
+      }else answer=`I don’t have enough saved yet to answer that properly. Add the thing once, then you can ask me about it normally.`;
+    }
+    trackEvent(s.user_id,'ask',{intent:q.slice(0,80)});return json(res,200,{answer});
+  }'''
+
+          if old not in original:
+              raise SystemExit('Expected Ask Kivo block was not found in v1.0.15')
+          upgraded = original.replace(old,new)
+          Path('server.js').write_text(upgraded,encoding='utf-8')
+
+      - name: Verify JavaScript
+        run: node --check server.js
+
+      - name: Commit repaired intelligent Ask Kivo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.js
+          git commit -m "Make Ask Kivo contextual, human and action-focused"
+          git push
