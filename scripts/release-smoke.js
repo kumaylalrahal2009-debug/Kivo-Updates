@@ -8,7 +8,7 @@ const fail=msg=>{console.error(`KIVO RELEASE CHECK FAILED: ${msg}`);process.exit
 const ok=msg=>console.log(`✓ ${msg}`);
 
 const required=[
-  'secure-gateway.js','server.js','core-runtime.js','force-loopback.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js',
+  'secure-gateway.js','server.js','core-runtime.js','force-loopback.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js','lib/account-service.js',
   'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css','public/money-intelligence.js','public/account-controls.js','public/manifest.json','public/sw.js',
   'start-kivo.bat','apply-update.ps1','.gitignore'
 ];
@@ -18,6 +18,7 @@ if(exists('secure-gateway.js')){
   const gateway=read('secure-gateway.js');
   /smart-experience-v2\.js/.test(gateway)?ok('security gateway launches Smart Experience v2'):fail('gateway does not launch Smart Experience v2');
   /NODE_OPTIONS/.test(gateway)&&/force-loopback\.js/.test(gateway)?ok('gateway forces internal Node services onto loopback'):fail('gateway does not propagate loopback isolation');
+  /createAccountService/.test(gateway)&&/api\/account/.test(gateway)?ok('gateway owns explicit account privacy routes'):fail('gateway is not wired to the account privacy service');
   /RateLimit-Limit/.test(gateway)&&/429/.test(gateway)?ok('public gateway has request rate limiting'):fail('public rate limiting is missing');
   /Content-Security-Policy/.test(gateway)&&/X-Frame-Options/.test(gateway)?ok('public gateway sets browser security headers'):fail('browser security headers are missing');
   /billing\/webhook/.test(gateway)&&/300/.test(gateway)?ok('Stripe webhook timestamp freshness check present'):fail('webhook replay freshness check missing');
@@ -49,7 +50,15 @@ if(exists('core-runtime.js')){
   const runtime=read('core-runtime.js');
   /KIVO_CORE_ADMIN_PASSWORD/.test(runtime)?ok('core runtime injects private internal admin password'):fail('core runtime does not inject private admin credential');
   /ADMIN_PASSWORD/.test(runtime)&&/replace/.test(runtime)?ok('legacy starter admin constant is overridden in memory'):fail('legacy admin constant override missing');
-  /api\/account\/export/.test(runtime)&&/api\/account\/password/.test(runtime)?ok('account privacy APIs are injected into secure runtime'):fail('account privacy APIs missing from secure runtime');
+}
+
+if(exists('lib/account-service.js')){
+  const account=read('lib/account-service.js');
+  /api\/account\/export/.test(account)&&/api\/account\/profile/.test(account)&&/api\/account\/password/.test(account)?ok('account export/profile/password routes are explicit'):fail('account privacy endpoints are incomplete');
+  /method==='DELETE'/.test(account)&&/pathname==='\/api\/account'/.test(account)?ok('permanent account deletion endpoint is explicit'):fail('account deletion endpoint missing');
+  /pbkdf2Sync/.test(account)&&/current_password/.test(account)?ok('password change re-verifies the current password'):fail('password re-verification is missing');
+  /BEGIN IMMEDIATE/.test(account)&&/ROLLBACK/.test(account)?ok('destructive account changes use transactions'):fail('account transaction protection missing');
+  /password_hash/.test(account)&&!/SELECT \* FROM users/.test(account)?ok('account export avoids broad user-record selection'):fail('account export may expose unnecessary user fields');
 }
 
 if(exists('smart-experience-v2.js')){
@@ -105,7 +114,7 @@ if(exists('public/sw.js')){
   /app\.js/.test(sw)&&/styles\.css/.test(sw)?ok('PWA keeps live app bundles out of cache'):fail('PWA may hide app updates behind cached bundles');
 }
 
-const secretScanFiles=['secure-gateway.js','bootstrap.js','core-runtime.js','experience.js','smart-experience-v2.js','lib/update-engine.js','public/app.js','public/premium.js','public/smart-client.js','public/account-controls.js'];
+const secretScanFiles=['secure-gateway.js','bootstrap.js','core-runtime.js','experience.js','smart-experience-v2.js','lib/update-engine.js','lib/account-service.js','public/app.js','public/premium.js','public/smart-client.js','public/account-controls.js'];
 for(const file of secretScanFiles){
   if(!exists(file))continue;
   const text=read(file);
