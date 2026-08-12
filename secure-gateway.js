@@ -2,12 +2,17 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const {spawn}=require('node:child_process');
+const {createAccountService}=require('./lib/account-service');
 
 const ROOT=__dirname;
 const PUBLIC_PORT=Number(process.env.PORT||8488);
 const APP_PORT=Number(process.env.KIVO_GATEWAY_INNER_PORT||(PUBLIC_PORT+8));
+const DATA=path.resolve(process.env.KIVO_DATA_DIR||path.join(ROOT,'data'));
+const UPLOADS=path.resolve(process.env.KIVO_UPLOAD_DIR||path.join(ROOT,'uploads'));
 const MAX_BODY_BYTES=Math.max(1024*1024,Number(process.env.KIVO_MAX_REQUEST_BYTES||8*1024*1024));
 const LOOPBACK_PRELOAD='./force-loopback.js';
+fs.mkdirSync(DATA,{recursive:true});fs.mkdirSync(UPLOADS,{recursive:true});
+const accountService=createAccountService({dataDir:DATA,uploadsDir:UPLOADS,secureCookies:String(process.env.SECURE_COOKIES||'false').toLowerCase()==='true'});
 const buckets=new Map();
 
 function clientIp(req){
@@ -41,16 +46,21 @@ function json(res,status,obj,extra={}){
   res.writeHead(status,{...securityHeaders({socket:{encrypted:false},headers:{}}),'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...extra});
   res.end(JSON.stringify(obj));
 }
+function serviceResult(req,res,result){
+  if(!result)return false;
+  res.writeHead(result.status||500,{...securityHeaders(req),'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...(result.headers||{})});res.end(JSON.stringify(result.body||{}));return true;
+}
 function policy(method,pathname){
   if(method==='POST'&&pathname==='/api/admin/login')return{name:'owner-login',limit:8,windowMs:10*60*1000};
   if(method==='POST'&&(pathname==='/api/login'||pathname==='/api/register'))return{name:'auth',limit:12,windowMs:10*60*1000};
   if(method==='POST'&&pathname==='/api/account/password')return{name:'password',limit:8,windowMs:10*60*1000};
   if(method==='DELETE'&&pathname==='/api/account')return{name:'account-delete',limit:8,windowMs:10*60*1000};
-  if(method==='POST'&&(pathname==='/api/ask'||pathname==='/api/capture'))return{name:'smart-actions',limit:90,windowMs:60*1000};
+  if(reqPathSmart(pathname)&&method==='POST')return{name:'smart-actions',limit:90,windowMs:60*1000};
   if(method==='POST'&&(pathname==='/api/billing/checkout'||pathname==='/api/billing/portal'))return{name:'billing-actions',limit:30,windowMs:60*1000};
   if(pathname.startsWith('/api/')&&method!=='GET'&&method!=='HEAD')return{name:'api-write',limit:180,windowMs:60*1000};
   return null;
 }
+function reqPathSmart(pathname){return pathname==='/api/ask'||pathname==='/api/capture'}
 function consume(key,p){
   const t=Date.now();let b=buckets.get(key);
   if(!b||t>=b.resetAt){b={count:0,resetAt:t+p.windowMs};buckets.set(key,b)}
@@ -138,9 +148,12 @@ const server=http.createServer(async(req,res)=>{
     if(rateLimit(req,res,url))return;
     if(!webhookTimestampFresh(req,url))return json(res,400,{error:'Stripe webhook timestamp is too old or too far in the future.'});
     if(req.method==='GET'&&url.pathname==='/app.js')return proxyAppBundle(req,res);
+    if(req.method==='GET'&&url.pathname==='/api/account/export')return serviceResult(req,res,await accountService.handle(req,url,null));
     const method=req.method||'GET';
     if(['POST','PUT','PATCH','DELETE'].includes(method)){
-      const body=await readBody(req);return proxyBuffered(req,res,body);
+      const body=await readBody(req);
+      if(url.pathname.startsWith('/api/account'))return serviceResult(req,res,await accountService.handle(req,url,body));
+      return proxyBuffered(req,res,body);
     }
     return proxyStreaming(req,res);
   }catch(err){
@@ -151,8 +164,8 @@ const server=http.createServer(async(req,res)=>{
 server.requestTimeout=30000;
 server.headersTimeout=15000;
 server.keepAliveTimeout=5000;
-server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Security Gateway: http://localhost:${PUBLIC_PORT}\nProtected Smart v2: 127.0.0.1:${APP_PORT}\nRate limits, hardened headers, request limits and webhook replay protection enabled.\n`));
+server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Security Gateway: http://localhost:${PUBLIC_PORT}\nProtected Smart v2: 127.0.0.1:${APP_PORT}\nRate limits, hardened headers, account privacy controls, request limits and webhook replay protection enabled.\n`));
 
-function shutdown(){try{server.close()}catch{};try{child.kill()}catch{};setTimeout(()=>process.exit(0),500).unref()}
+function shutdown(){try{server.close()}catch{};try{accountService.close()}catch{};try{child.kill()}catch{};setTimeout(()=>process.exit(0),500).unref()}
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
 setInterval(()=>{const t=Date.now();for(const[k,b]of buckets)if(t>b.resetAt+60000)buckets.delete(k)},60000).unref();
