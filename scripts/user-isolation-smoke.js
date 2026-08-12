@@ -20,7 +20,7 @@ async function req(url,opt={}){const r=await fetch(base+url,opt),text=await r.te
 async function expect(url,opt,status){const x=await req(url,opt);if(x.r.status!==status)fail(`${opt.method||'GET'} ${url}: expected ${status}, got ${x.r.status}`,JSON.stringify(x.body));return x}
 async function ready(){const start=Date.now();while(Date.now()-start<30000){try{if((await req('/api/admin/me')).r.status===200)return}catch{}await new Promise(r=>setTimeout(r,300))}fail('secured Kivo did not boot',output.slice(-7000))}
 function stopTree(child){try{if(process.platform==='win32')spawnSync('taskkill',['/pid',String(child.pid),'/t','/f'],{stdio:'ignore'});else child.kill('SIGTERM')}catch{}}
-async function register(label){const email=`${label}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}@example.test`;const password=`Kivo-${label}-Password-2026!`;const x=await expect('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:`${label} User`,email,password})},201);return{email,password,cookie:cookieOf(x.r),csrf:x.body.csrf,id:Number(x.body.user?.id)}}
+async function register(label){const email=`${label.toLowerCase()}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}@example.test`;const password=`Kivo-${label}-Password-2026!`;const x=await expect('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:`${label} User`,email,password})},201);return{email,password,cookie:cookieOf(x.r),csrf:x.body.csrf,id:Number(x.body.user?.id)}}
 async function capture(user,text){return expect('/api/capture',{method:'POST',headers:{Cookie:user.cookie,'Content-Type':'application/json','X-CSRF-Token':user.csrf},body:JSON.stringify({text})},201)}
 
 const child=spawn(process.execPath,['--no-warnings',path.join(ROOT,'secure-gateway.js')],{
@@ -89,7 +89,7 @@ child.stdout.on('data',d=>{output+=d;process.stdout.write(d)});child.stderr.on('
     const bobStill=await expect('/api/items',{headers:{Cookie:bob.cookie}},200);
     if(!JSON.stringify(bobStill.body).toLowerCase().includes('bob private streaming'))fail('deleting Alice affected Bob data');
     const bobExport=await expect('/api/account/export',{headers:{Cookie:bob.cookie}},200);
-    if(bobExport.body.profile?.email!==bob.email)fail('Bob account export broke after deleting Alice',JSON.stringify(bobExport.body));
+    if(String(bobExport.body.profile?.email||'').toLowerCase()!==bob.email.toLowerCase())fail('Bob account export broke after deleting Alice',JSON.stringify(bobExport.body));
     log('deleting one user does not affect another user or export');
 
     console.log('\nKivo multi-user isolation smoke test passed.');
