@@ -18,31 +18,31 @@ const fail=(x,b='')=>{throw new Error(`${x}${b?`\n${b}`:''}`)};
 const cookieOf=r=>(r.headers.get('set-cookie')||'').split(';')[0];
 async function req(url,opt={}){const r=await fetch(base+url,opt),text=await r.text();let body=text;try{body=JSON.parse(text)}catch{}return{r,body}}
 async function expect(url,opt,status){const x=await req(url,opt);if(x.r.status!==status)fail(`${opt.method||'GET'} ${url}: expected ${status}, got ${x.r.status}`,JSON.stringify(x.body));return x}
-async function ready(){const start=Date.now();while(Date.now()-start<25000){try{if((await req('/api/admin/me')).r.status===200)return}catch{}await new Promise(r=>setTimeout(r,300))}fail('Kivo did not boot',output.slice(-5000))}
+async function ready(){const start=Date.now();while(Date.now()-start<30000){try{if((await req('/api/admin/me')).r.status===200)return}catch{}await new Promise(r=>setTimeout(r,300))}fail('secured Kivo did not boot',output.slice(-7000))}
 function stopTree(child){try{if(process.platform==='win32')spawnSync('taskkill',['/pid',String(child.pid),'/t','/f'],{stdio:'ignore'});else child.kill('SIGTERM')}catch{}}
-async function register(label){const email=`${label}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}@example.test`;const password=`Kivo-${label}-Password-2026!`;const x=await expect('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:`${label} User`,email,password})},201);return{email,password,cookie:cookieOf(x.r),csrf:x.body.csrf}}
+async function register(label){const email=`${label}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}@example.test`;const password=`Kivo-${label}-Password-2026!`;const x=await expect('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:`${label} User`,email,password})},201);return{email,password,cookie:cookieOf(x.r),csrf:x.body.csrf,id:Number(x.body.user?.id)}}
 async function capture(user,text){return expect('/api/capture',{method:'POST',headers:{Cookie:user.cookie,'Content-Type':'application/json','X-CSRF-Token':user.csrf},body:JSON.stringify({text})},201)}
 
-const child=spawn(process.execPath,['--no-warnings',path.join(ROOT,'smart-experience-v2.js')],{
+const child=spawn(process.execPath,['--no-warnings',path.join(ROOT,'secure-gateway.js')],{
   cwd:ROOT,
-  env:{...process.env,PORT:String(PORT),KIVO_LOCAL_DESKTOP:'false',KIVO_DATA_DIR:dataDir,KIVO_UPLOAD_DIR:uploadsDir,KIVO_ADMIN_EMAIL:'owner@kivo.local',KIVO_ADMIN_PASSWORD:ownerPassword,OPENAI_API_KEY:'',STRIPE_SECRET_KEY:'',STRIPE_WEBHOOK_SECRET:'',KIVO_UPDATE_REPO:'kumaylalrahal2009-debug/Kivo-Updates'},
+  env:{...process.env,PORT:String(PORT),KIVO_LOCAL_DESKTOP:'false',KIVO_DATA_DIR:dataDir,KIVO_UPLOAD_DIR:uploadsDir,KIVO_ADMIN_EMAIL:'owner@kivo.local',KIVO_ADMIN_PASSWORD:ownerPassword,KIVO_TRUST_PROXY:'false',SECURE_COOKIES:'false',OPENAI_API_KEY:'',STRIPE_SECRET_KEY:'',STRIPE_WEBHOOK_SECRET:'',KIVO_UPDATE_REPO:'kumaylalrahal2009-debug/Kivo-Updates'},
   stdio:['ignore','pipe','pipe']
 });
 child.stdout.on('data',d=>{output+=d;process.stdout.write(d)});child.stderr.on('data',d=>{output+=d;process.stderr.write(d)});
 
 (async()=>{
   try{
-    await ready();log('Kivo booted for isolation test');
+    await ready();log('secured Kivo gateway booted for isolation test');
     const [alice,bob]=await Promise.all([register('Alice'),register('Bob')]);
-    if(!alice.cookie||!bob.cookie||alice.cookie===bob.cookie)fail('distinct users did not receive distinct sessions');
-    log('two users receive distinct authenticated sessions');
+    if(!alice.cookie||!bob.cookie||alice.cookie===bob.cookie||!alice.id||!bob.id||alice.id===bob.id)fail('distinct users did not receive distinct identities/sessions');
+    log('two users receive distinct authenticated identities and sessions');
 
     const [aItem,bItem]=await Promise.all([
       capture(alice,'Alice private gym membership 20 every month on the 5th'),
       capture(bob,'Bob private streaming service 17 every month on the 9th')
     ]);
-    const aliceId=aItem.body.item?.id,bobId=bItem.body.item?.id;if(!aliceId||!bobId)fail('test items were not created');
-    log('users can create records concurrently');
+    const aliceId=aItem.body.id,bobId=bItem.body.id;if(!aliceId||!bobId||aliceId===bobId)fail('test items were not created with distinct IDs',JSON.stringify({a:aItem.body,b:bItem.body}));
+    log('users can create distinct records concurrently');
 
     const [aList,bList]=await Promise.all([
       expect('/api/items',{headers:{Cookie:alice.cookie}},200),
@@ -61,30 +61,37 @@ child.stdout.on('data',d=>{output+=d;process.stdout.write(d)});child.stderr.on('
     if(JSON.stringify(bExport.body).includes(alice.email)||JSON.stringify(bExport.body).toLowerCase().includes('alice private gym'))fail('Bob export contains Alice data');
     log('full account exports remain isolated');
 
-    const attackStatus=await req(`/api/items/${aliceId}/status`,{method:'PATCH',headers:{Cookie:bob.cookie,'Content-Type':'application/json','X-CSRF-Token':bob.csrf},body:JSON.stringify({status:'done'})});
-    if(![404,403].includes(attackStatus.r.status))fail('Bob was able to mutate Alice item by ID',JSON.stringify(attackStatus.body));
+    const attackStatus=await req(`/api/items/${aliceId}/status`,{method:'POST',headers:{Cookie:bob.cookie,'Content-Type':'application/json','X-CSRF-Token':bob.csrf},body:JSON.stringify({status:'done'})});
+    if(![404,403].includes(attackStatus.r.status))fail('Bob was able to mutate Alice item through the real status route',JSON.stringify(attackStatus.body));
+    const aliceAfterAttack=await expect('/api/items',{headers:{Cookie:alice.cookie}},200);
+    const untouched=aliceAfterAttack.body.items?.find(x=>x.id===aliceId);if(!untouched||untouched.status!=='open')fail('Alice item changed after Bob mutation attack',JSON.stringify(aliceAfterAttack.body));
+
     const attackDelete=await req(`/api/items/${aliceId}`,{method:'DELETE',headers:{Cookie:bob.cookie,'Content-Type':'application/json','X-CSRF-Token':bob.csrf},body:'{}'});
     if(![404,403].includes(attackDelete.r.status))fail('Bob was able to delete Alice item by ID',JSON.stringify(attackDelete.body));
-    log('cross-account mutation attempts are rejected');
+    const aliceAfterDeleteAttack=await expect('/api/items',{headers:{Cookie:alice.cookie}},200);
+    if(!aliceAfterDeleteAttack.body.items?.some(x=>x.id===aliceId))fail('Alice item disappeared after Bob deletion attack');
+    log('real cross-account mutation and deletion attempts are rejected');
 
     const asks=await Promise.all([
       expect('/api/ask',{method:'POST',headers:{Cookie:alice.cookie,'Content-Type':'application/json','X-CSRF-Token':alice.csrf},body:JSON.stringify({q:'what am i paying for?'})},200),
       expect('/api/ask',{method:'POST',headers:{Cookie:bob.cookie,'Content-Type':'application/json','X-CSRF-Token':bob.csrf},body:JSON.stringify({q:'what am i paying for?'})},200)
     ]);
     const aa=String(asks[0].body.answer||'').toLowerCase(),ba=String(asks[1].body.answer||'').toLowerCase();
-    if(!aa.includes('20')||aa.includes('streaming'))fail('Ask Kivo crossed context into Bob data',aa);
-    if(!ba.includes('17')||ba.includes('gym'))fail('Ask Kivo crossed context into Alice data',ba);
+    if(!aa.includes('20')||aa.includes('streaming')||aa.includes('17'))fail('Ask Kivo crossed context into Bob data',aa);
+    if(!ba.includes('17')||ba.includes('gym')||ba.includes('20'))fail('Ask Kivo crossed context into Alice data',ba);
     log('Ask Kivo context is isolated between simultaneous users');
 
     await expect('/api/account',{method:'DELETE',headers:{Cookie:alice.cookie,'Content-Type':'application/json','X-CSRF-Token':alice.csrf},body:JSON.stringify({password:alice.password,confirm:'DELETE'})},200);
     const bobStill=await expect('/api/items',{headers:{Cookie:bob.cookie}},200);
     if(!JSON.stringify(bobStill.body).toLowerCase().includes('bob private streaming'))fail('deleting Alice affected Bob data');
-    log('deleting one user does not affect another user');
+    const bobExport=await expect('/api/account/export',{headers:{Cookie:bob.cookie}},200);
+    if(bobExport.body.profile?.email!==bob.email)fail('Bob account export broke after deleting Alice',JSON.stringify(bobExport.body));
+    log('deleting one user does not affect another user or export');
 
     console.log('\nKivo multi-user isolation smoke test passed.');
   }catch(err){
     console.error(`\nKIVO USER ISOLATION TEST FAILED: ${err.stack||err.message}`);
-    console.error('\nLast Kivo output:\n'+output.slice(-7000));
+    console.error('\nLast Kivo output:\n'+output.slice(-9000));
     process.exitCode=1;
   }finally{stopTree(child);try{fs.rmSync(temp,{recursive:true,force:true})}catch{}}
 })();
