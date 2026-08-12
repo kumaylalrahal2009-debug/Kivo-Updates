@@ -8,7 +8,7 @@ const fail=msg=>{console.error(`KIVO RELEASE CHECK FAILED: ${msg}`);process.exit
 const ok=msg=>console.log(`✓ ${msg}`);
 
 const required=[
-  'server.js','bootstrap.js','experience.js','smart-experience.js',
+  'server.js','bootstrap.js','experience.js','smart-experience-v2.js',
   'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css',
   'start-kivo.bat','apply-update.ps1','.gitignore'
 ];
@@ -16,15 +16,18 @@ for(const file of required){exists(file)?ok(`found ${file}`):fail(`missing ${fil
 
 if(exists('start-kivo.bat')){
   const start=read('start-kivo.bat');
-  /smart-experience\.js/i.test(start)?ok('launcher uses Smart Experience'):fail('start-kivo.bat does not launch smart-experience.js');
+  /smart-experience-v2\.js/i.test(start)?ok('launcher uses Smart Experience v2'):fail('start-kivo.bat does not launch smart-experience-v2.js');
   /KIVO_UPDATE_REPO/i.test(start)?ok('launcher configures update repository'):fail('launcher does not configure update repository');
 }
 
-if(exists('smart-experience.js')){
-  const smart=read('smart-experience.js');
-  /smart-client\.js/.test(smart)?ok('Smart Experience appends smart-client.js'):fail('smart-client.js is not wired into Smart Experience');
-  /smart-ui\.css/.test(smart)?ok('Smart Experience appends smart-ui.css'):fail('smart-ui.css is not wired into Smart Experience');
+if(exists('smart-experience-v2.js')){
+  const smart=read('smart-experience-v2.js');
+  /smart-client\.js/.test(smart)?ok('Smart Experience v2 appends smart-client.js'):fail('smart-client.js is not wired into Smart Experience v2');
+  /smart-ui\.css/.test(smart)?ok('Smart Experience v2 appends smart-ui.css'):fail('smart-ui.css is not wired into Smart Experience v2');
   /corrected_query/.test(smart)?ok('assistant returns corrected query context'):fail('assistant correction metadata missing');
+  /assistant\/history/.test(smart)?ok('assistant history API present'):fail('assistant history API missing');
+  /admin\/smart-health/.test(smart)?ok('admin smart-health API present'):fail('admin smart-health API missing');
+  /AbortController/.test(smart)?ok('cloud AI timeout fallback present'):fail('cloud AI timeout fallback missing');
 }
 
 if(exists('apply-update.ps1')){
@@ -46,9 +49,12 @@ if(exists('public/smart-client.js')){
   /Ctrl/.test(client)&&/command/i.test(client)?ok('command/search experience present'):fail('command/search experience missing');
   /offline/i.test(client)?ok('offline handling present'):fail('offline handling missing');
   /unhandledrejection/i.test(client)?ok('client error boundary present'):fail('client error boundary missing');
+  /firstRunGuide/.test(client)?ok('new-user onboarding present'):fail('new-user onboarding missing');
+  /inboxFilterBar/.test(client)?ok('inbox search/filter present'):fail('inbox search/filter missing');
+  /kivoFocusCard/.test(client)?ok('priority focus card present'):fail('priority focus card missing');
 }
 
-const secretScanFiles=['server.js','bootstrap.js','experience.js','smart-experience.js','public/app.js','public/premium.js','public/smart-client.js'];
+const secretScanFiles=['server.js','bootstrap.js','experience.js','smart-experience-v2.js','public/app.js','public/premium.js','public/smart-client.js'];
 for(const file of secretScanFiles){
   if(!exists(file))continue;
   const text=read(file);
