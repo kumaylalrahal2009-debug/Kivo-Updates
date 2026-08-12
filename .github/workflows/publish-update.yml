@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths-ignore:
       - "README.md"
+      - "docs/**"
+      - "*.md"
+      - "*.txt"
       - "data/**"
       - "uploads/**"
       - "updates/**"
