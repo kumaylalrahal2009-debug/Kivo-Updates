@@ -21,16 +21,16 @@ function log(msg){console.log(`✓ ${msg}`)}
 function fail(msg,extra=''){throw new Error(`${msg}${extra?`\n${extra}`:''}`)}
 function cookieFrom(response){const raw=response.headers.get('set-cookie')||'';return raw.split(';')[0]||''}
 async function request(url,opt={}){
-  const r=await fetch(base+url,opt);let body=null;const text=await r.text();try{body=JSON.parse(text)}catch{body=text}return{r,body};
+  const r=await fetch(base+url,opt);let body=null;const text=await r.text();try{body=JSON.parse(text)}catch{body=text}return{r,body,text};
 }
 async function expect(url,opt,status){const result=await request(url,opt);if(result.r.status!==status)fail(`${opt.method||'GET'} ${url} expected ${status}, got ${result.r.status}`,JSON.stringify(result.body));return result}
-async function waitUntilReady(timeout=25000){
+async function waitUntilReady(timeout=30000){
   const start=Date.now();let last='';
   while(Date.now()-start<timeout){
     try{const {r}=await request('/api/admin/me');if(r.status===200)return}catch(err){last=err.message}
     await new Promise(r=>setTimeout(r,350));
   }
-  fail('Kivo did not become ready in time',`${last}\n${output.slice(-5000)}`);
+  fail('Kivo did not become ready in time',`${last}\n${output.slice(-7000)}`);
 }
 function stopTree(child){
   if(!child||child.exitCode!==null)return;
@@ -40,21 +40,26 @@ function stopTree(child){
   }catch{}
 }
 
-const child=spawn(process.execPath,['--no-warnings',path.join(ROOT,'smart-experience-v2.js')],{
+const child=spawn(process.execPath,['--no-warnings',path.join(ROOT,'secure-gateway.js')],{
   cwd:ROOT,
-  env:{...process.env,PORT:String(PORT),KIVO_LOCAL_DESKTOP:'false',KIVO_DATA_DIR:dataDir,KIVO_UPLOAD_DIR:uploadsDir,KIVO_ADMIN_EMAIL:ownerEmail,KIVO_ADMIN_PASSWORD:ownerPassword,OPENAI_API_KEY:'',STRIPE_SECRET_KEY:'',STRIPE_WEBHOOK_SECRET:'',KIVO_UPDATE_REPO:'kumaylalrahal2009-debug/Kivo-Updates'},
+  env:{...process.env,PORT:String(PORT),KIVO_LOCAL_DESKTOP:'false',KIVO_DATA_DIR:dataDir,KIVO_UPLOAD_DIR:uploadsDir,KIVO_ADMIN_EMAIL:ownerEmail,KIVO_ADMIN_PASSWORD:ownerPassword,KIVO_TRUST_PROXY:'false',SECURE_COOKIES:'false',OPENAI_API_KEY:'',STRIPE_SECRET_KEY:'',STRIPE_WEBHOOK_SECRET:'',KIVO_UPDATE_REPO:'kumaylalrahal2009-debug/Kivo-Updates'},
   stdio:['ignore','pipe','pipe']
 });
 child.stdout.on('data',d=>{output+=d.toString();process.stdout.write(d)});child.stderr.on('data',d=>{output+=d.toString();process.stderr.write(d)});
 
 (async()=>{
   try{
-    await waitUntilReady();log('full Smart v2 stack boots on a clean database');
+    await waitUntilReady();log('full secured Smart v2 stack boots on a clean database');
 
     const home=await expect('/',{},200);
     if(!String(home.body).includes('Kivo'))fail('public Kivo page did not render');
     if(String(home.body).includes('KivoAdmin2026'))fail('legacy starter admin password leaked into public HTML');
-    log('public UI renders without legacy admin credential');
+    if(home.r.headers.get('x-frame-options')!=='DENY')fail('public gateway security headers are missing');
+    log('public UI renders through security gateway without legacy credential leakage');
+
+    const bundle=await expect('/app.js?e2e=1',{},200);
+    if(!bundle.text.includes('MONEY INTELLIGENCE')||!bundle.text.includes('ACCOUNT & PRIVACY'))fail('live app bundle is missing Kivo extension modules');
+    log('browser receives Smart UI, Money Intelligence and Account Controls in the live app bundle');
 
     const wrongAdmin=await request('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:ownerEmail,password:'wrong-password'})});
     if(wrongAdmin.r.status!==401)fail('wrong owner password was not rejected',JSON.stringify(wrongAdmin.body));
@@ -95,6 +100,10 @@ child.stdout.on('data',d=>{output+=d.toString();process.stdout.write(d)});child.
     if(smartStatus.body.version!=='smart-v2'||smartStatus.body.mode!=='local')fail('Smart v2 status is incorrect',JSON.stringify(smartStatus.body));
     log('Smart v2 health/status endpoint is live');
 
+    const exportData=await expect('/api/account/export',{headers:{Cookie:userCookie}},200);
+    if(exportData.body.profile?.email!==email||!exportData.body.items?.length)fail('account export is not wired into the secured product',JSON.stringify(exportData.body));
+    log('account privacy service is live through the public gateway');
+
     const adminLogin=await expect('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:ownerEmail,password:ownerPassword})},200);
     const adminCookie=cookieFrom(adminLogin.r);
     if(!adminCookie)fail('owner login did not return admin session cookie');
@@ -116,10 +125,10 @@ child.stdout.on('data',d=>{output+=d.toString();process.stdout.write(d)});child.
     if(!clear.body.ok)fail('conversation clear endpoint failed');
     log('user can clear Ask Kivo conversation history');
 
-    console.log('\nKivo end-to-end product smoke test passed.');
+    console.log('\nKivo secured end-to-end product smoke test passed.');
   }catch(err){
     console.error(`\nKIVO INTEGRATION TEST FAILED: ${err.stack||err.message}`);
-    console.error('\nLast Kivo process output:\n'+output.slice(-8000));
+    console.error('\nLast Kivo process output:\n'+output.slice(-9000));
     process.exitCode=1;
   }finally{
     stopTree(child);
