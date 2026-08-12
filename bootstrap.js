@@ -10,7 +10,7 @@ const PUBLIC_PORT = Number(process.env.PORT || 8488);
 const CORE_PORT = Number(process.env.KIVO_CORE_PORT || (PUBLIC_PORT + 1));
 const DATA = path.resolve(process.env.KIVO_DATA_DIR || path.join(ROOT, 'data'));
 const DB_PATH = path.join(DATA, 'kivo.db');
-const CORE_SERVER = path.join(ROOT, 'server.js');
+const CORE_SERVER = path.join(ROOT, 'core-runtime.js');
 const LOOPBACK_PRELOAD = path.join(ROOT, 'force-loopback.js');
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
@@ -19,6 +19,10 @@ const STRIPE_PRICE_PRO_YEARLY = process.env.STRIPE_PRICE_PRO_YEARLY || '';
 const PUBLIC_URL = (process.env.KIVO_PUBLIC_URL || `http://localhost:${PUBLIC_PORT}`).replace(/\/$/, '');
 const PRO_MONTHLY_AUD = Number(process.env.KIVO_PRO_MONTHLY_AUD || 7.99);
 const PRO_YEARLY_AUD = Number(process.env.KIVO_PRO_YEARLY_AUD || 59.99);
+const OWNER_EMAIL = String(process.env.KIVO_ADMIN_EMAIL || 'owner@kivo.local').trim().toLowerCase();
+const OWNER_PASSWORD = String(process.env.KIVO_ADMIN_PASSWORD || '').trim();
+const CORE_ADMIN_EMAIL = 'owner@kivo.local';
+const CORE_ADMIN_PASSWORD = crypto.randomBytes(32).toString('base64url');
 
 fs.mkdirSync(DATA, {recursive:true});
 const db = new DatabaseSync(DB_PATH);
@@ -67,9 +71,29 @@ function recordBillingEvent(eventId,type,userId,amountAud=0){try{db.prepare('INS
 function updateMembership(uid,patch){ensureMembership(uid);const allowed=['plan','status','billing_interval','stripe_customer_id','stripe_subscription_id','current_period_end'];const sets=[],vals=[];for(const k of allowed){if(Object.prototype.hasOwnProperty.call(patch,k)){sets.push(`${k}=?`);vals.push(patch[k]);}}sets.push('updated_at=?');vals.push(now(),uid);db.prepare(`UPDATE memberships SET ${sets.join(',')} WHERE user_id=?`).run(...vals);}
 function revenueStats(){const totalUsers=db.prepare('SELECT COUNT(*) n FROM users').get().n;const proUsers=db.prepare("SELECT COUNT(*) n FROM memberships WHERE plan='pro' AND status IN ('active','trialing')").get().n;const freeUsers=Math.max(0,totalUsers-proUsers);const totalRevenue=db.prepare('SELECT COALESCE(SUM(amount_aud),0) n FROM billing_events').get().n;const revenue30=db.prepare('SELECT COALESCE(SUM(amount_aud),0) n FROM billing_events WHERE created_at>=?').get(new Date(Date.now()-30*86400000).toISOString()).n;const monthly=db.prepare("SELECT COUNT(*) n FROM memberships WHERE plan='pro' AND status IN ('active','trialing') AND billing_interval='month'").get().n;const yearly=db.prepare("SELECT COUNT(*) n FROM memberships WHERE plan='pro' AND status IN ('active','trialing') AND billing_interval='year'").get().n;const mrr=monthly*PRO_MONTHLY_AUD+yearly*(PRO_YEARLY_AUD/12);const conversion=totalUsers?Math.round((proUsers/totalUsers)*1000)/10:0;const recent=db.prepare('SELECT event_type,amount_aud,created_at,user_id FROM billing_events ORDER BY id DESC LIMIT 20').all();return {totalUsers,proUsers,freeUsers,totalRevenue:Number(totalRevenue),revenue30:Number(revenue30),mrr:Number(mrr.toFixed(2)),conversion,recent,stripeConnected:billingConfig().connected};}
 
+function proxy(req,res,bodyOverride=null){
+  const headers={...req.headers,host:`127.0.0.1:${CORE_PORT}`};
+  if(bodyOverride!==null){headers['content-type']='application/json';headers['content-length']=Buffer.byteLength(bodyOverride);delete headers['transfer-encoding'];}
+  const p=http.request({hostname:'127.0.0.1',port:CORE_PORT,path:req.url,method:req.method,headers},r=>{const out={...r.headers};out['cache-control']='no-store';res.writeHead(r.statusCode||500,out);r.pipe(res);});
+  p.on('error',()=>send(res,503,{error:'Kivo is starting. Try again in a moment.'}));
+  if(bodyOverride!==null)p.end(bodyOverride);else req.pipe(p);
+}
+
 async function handlePremium(req,res,url){
   if(url.pathname==='/premium.js'&&req.method==='GET'){const p=path.join(ROOT,'public','premium.js');res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'});return fs.createReadStream(p).pipe(res);}
   if(url.pathname==='/premium.css'&&req.method==='GET'){const p=path.join(ROOT,'public','premium.css');res.writeHead(200,{'Content-Type':'text/css; charset=utf-8','Cache-Control':'no-store'});return fs.createReadStream(p).pipe(res);}
+
+  if(url.pathname==='/api/admin/login'&&req.method==='POST'){
+    const raw=await readBody(req);let body={};try{body=JSON.parse(raw.toString('utf8')||'{}')}catch{}
+    const email=String(body.email||'').trim().toLowerCase(),password=String(body.password||'');
+    if(!OWNER_PASSWORD)return send(res,503,{error:'Owner login is not configured yet. Set KIVO_ADMIN_PASSWORD in business-config.bat.'});
+    if(email!==OWNER_EMAIL||!safeEqual(password,OWNER_PASSWORD))return send(res,401,{error:'Admin email or password is incorrect.'});
+    return proxy(req,res,JSON.stringify({email:CORE_ADMIN_EMAIL,password:CORE_ADMIN_PASSWORD}));
+  }
+  if(url.pathname==='/api/admin/security-status'&&req.method==='GET'){
+    const a=adminSession(req);if(!a)return send(res,401,{error:'Admin login required.'});return send(res,200,{ownerPasswordConfigured:!!OWNER_PASSWORD,coreLoopback:true,ownerEmail:OWNER_EMAIL});
+  }
+
   if(url.pathname==='/api/billing/webhook'&&req.method==='POST'){
     const raw=await readBody(req);if(!stripeSignatureValid(raw,req.headers['stripe-signature']))return send(res,400,{error:'Invalid Stripe signature.'});
     let event;try{event=JSON.parse(raw.toString('utf8'));}catch{return send(res,400,{error:'Invalid webhook JSON.'});}
@@ -115,14 +139,10 @@ async function handlePremium(req,res,url){
   return send(res,404,{error:'Not found.'});
 }
 
-const coreEnv={...process.env,PORT:String(CORE_PORT),KIVO_DATA_DIR:DATA,KIVO_UPLOAD_DIR:path.resolve(process.env.KIVO_UPLOAD_DIR||path.join(ROOT,'uploads'))};
-const coreArgs=['--no-warnings'];
-if(fs.existsSync(LOOPBACK_PRELOAD))coreArgs.push('-r',LOOPBACK_PRELOAD);
-coreArgs.push(CORE_SERVER);
+const coreEnv={...process.env,PORT:String(CORE_PORT),KIVO_DATA_DIR:DATA,KIVO_UPLOAD_DIR:path.resolve(process.env.KIVO_UPLOAD_DIR||path.join(ROOT,'uploads')),KIVO_CORE_ADMIN_EMAIL:CORE_ADMIN_EMAIL,KIVO_CORE_ADMIN_PASSWORD:CORE_ADMIN_PASSWORD};
+const coreArgs=['--no-warnings'];if(fs.existsSync(LOOPBACK_PRELOAD))coreArgs.push('-r',LOOPBACK_PRELOAD);coreArgs.push(CORE_SERVER);
 const core=spawn(process.execPath,coreArgs,{cwd:ROOT,env:coreEnv,stdio:['ignore','inherit','inherit']});
 core.on('exit',code=>{console.log(`Kivo core exited (${code??0}); closing bootstrap.`);process.exit(code??0);});
 
-function proxy(req,res){const options={hostname:'127.0.0.1',port:CORE_PORT,path:req.url,method:req.method,headers:{...req.headers,host:`127.0.0.1:${CORE_PORT}`}};const p=http.request(options,r=>{const headers={...r.headers};headers['cache-control']='no-store';res.writeHead(r.statusCode||500,headers);r.pipe(res);});p.on('error',()=>send(res,503,{error:'Kivo is starting. Try again in a moment.'}));req.pipe(p);}
-
 const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);const handled=await handlePremium(req,res,url);if(handled!==false)return;proxy(req,res);}catch(err){console.error('Kivo bootstrap:',err);if(!res.headersSent)send(res,500,{error:'Something went wrong.'});}});
-server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Experience Layer: http://localhost:${PUBLIC_PORT}\nCore server: loopback only on 127.0.0.1:${CORE_PORT}\nBilling: ${billingConfig().connected?'Stripe connected':'setup required'}\n`));
+server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Experience Layer: http://localhost:${PUBLIC_PORT}\nCore: isolated runtime on 127.0.0.1:${CORE_PORT}\nOwner admin: ${OWNER_PASSWORD?'configured privately':'configuration required'}\nBilling: ${billingConfig().connected?'Stripe connected':'setup required'}\n`));
