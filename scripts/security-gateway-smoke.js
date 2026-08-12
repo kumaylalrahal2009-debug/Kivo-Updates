@@ -30,17 +30,21 @@ child.stdout.on('data',d=>{output+=d;process.stdout.write(d)});child.stderr.on('
   await waitReady();log('security gateway boots the complete Kivo stack');
 
   const home=await request('/');if(home.r.status!==200)fail('public app did not load through gateway');
-  if(home.r.headers.get('x-frame-options')!=='DENY')fail('X-Frame-Options is not DENY');
+  if(home.r.headers.get('x-frame-options')!=='DENY')fail(`X-Frame-Options is not authoritative DENY (${home.r.headers.get('x-frame-options')})`);
   if(!String(home.r.headers.get('content-security-policy')||'').includes("frame-ancestors 'none'"))fail('CSP frame protection is missing');
   if(!String(home.r.headers.get('permissions-policy')||'').includes('camera=()'))fail('Permissions-Policy is missing');
   if(home.r.headers.get('x-content-type-options')!=='nosniff')fail('nosniff header is missing');
-  log('public responses receive hardened browser security headers');
+  log('public responses receive authoritative hardened browser security headers');
 
   const appBundle=await request('/app.js?security-test=1');
   if(appBundle.r.status!==200)fail(`public app bundle returned ${appBundle.r.status}`);
   if(!appBundle.text.includes('MONEY INTELLIGENCE')||!appBundle.text.includes('moneyIntelligence'))fail('Money Intelligence is not present in the live /app.js bundle');
   if(!appBundle.text.includes('ACCOUNT & PRIVACY')||!appBundle.text.includes('accountControlsCard'))fail('Account Controls are not present in the live /app.js bundle');
   log('Money Intelligence and Account Controls are actually delivered to the browser');
+
+  const unauthUpdate=await request('/api/update/check');
+  if(unauthUpdate.r.status!==401)fail(`anonymous update check expected 401, got ${unauthUpdate.r.status}`,JSON.stringify(unauthUpdate.body));
+  log('update API is authenticated at the public gateway');
 
   const stale=Math.floor(Date.now()/1000)-3600;
   const oldWebhook=await request('/api/billing/webhook',{method:'POST',headers:{'Content-Type':'application/json','Stripe-Signature':`t=${stale},v1=deadbeef`},body:'{}'});
@@ -62,9 +66,13 @@ child.stdout.on('data',d=>{output+=d;process.stdout.write(d)});child.stderr.on('
 
   const register=await request('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Security Test',email:`security-${Date.now()}@example.test`,password:'Security-CI-Password-2026!'})});
   if(register.r.status!==201)fail(`normal registration failed after attack traffic (${register.r.status})`,JSON.stringify(register.body));
-  const cookie=(register.r.headers.get('set-cookie')||'').split(';')[0];
+  const cookie=(register.r.headers.get('set-cookie')||'').split(';')[0],csrf=register.body?.csrf;
   const me=await request('/api/me',{headers:{Cookie:cookie}});if(me.r.status!==200||!me.body?.loggedIn)fail('normal authenticated traffic failed after rate-limit tests',JSON.stringify(me.body));
   log('normal user traffic remains functional after security controls trigger');
+
+  const serverInstall=await request('/api/update/install',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:'{}'});
+  if(serverInstall.r.status!==403||!/desktop/i.test(String(serverInstall.body?.error||'')))fail('server deployment was allowed to self-update',JSON.stringify(serverInstall.body));
+  log('self-update installation is locked to the local desktop build');
 
   console.log('\nKivo security gateway smoke test passed.');
 }catch(err){console.error(`\nKIVO SECURITY TEST FAILED: ${err.stack||err.message}`);console.error('\nLast process output:\n'+output.slice(-9000));process.exitCode=1}finally{stopTree(child);try{fs.rmSync(temp,{recursive:true,force:true})}catch{}}})();
