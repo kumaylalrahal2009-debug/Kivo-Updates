@@ -4,5 +4,6 @@ updates/
 backups/
 .env
 business-config.bat
+owner-login.txt
 *.db
 node_modules/
