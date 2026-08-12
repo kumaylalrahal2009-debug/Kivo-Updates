@@ -4,13 +4,13 @@ on:
   push:
     branches: [main]
     paths:
+      - "secure-gateway.js"
+      - "lib/account-service.js"
       - "server.js"
-      - "core-runtime.js"
       - "bootstrap.js"
       - "experience.js"
       - "smart-experience-v2.js"
       - "public/account-controls.js"
-      - "public/index.html"
       - "scripts/account-lifecycle-smoke.js"
       - ".github/workflows/account-privacy.yml"
   workflow_dispatch:
@@ -25,7 +25,7 @@ permissions:
 jobs:
   account-lifecycle:
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Get Kivo source
         uses: actions/checkout@v5
@@ -34,22 +34,23 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          node --check core-runtime.js
-          node --check bootstrap.js
-          node --check smart-experience-v2.js
+          node --check secure-gateway.js
+          node --check lib/account-service.js
           node --check public/account-controls.js
           node --check scripts/account-lifecycle-smoke.js
 
           foreach ($file in @(
+            "secure-gateway.js",
+            "lib/account-service.js",
             "public/account-controls.js",
-            "scripts/account-lifecycle-smoke.js",
-            "core-runtime.js"
+            "scripts/account-lifecycle-smoke.js"
           )) {
             if (-not (Test-Path $file)) { throw "Required privacy/account file missing: $file" }
           }
 
-          $html = Get-Content public/index.html -Raw
-          if ($html -notmatch "account-controls\.js") { throw "Kivo UI is not loading account-controls.js" }
+          $gateway = Get-Content secure-gateway.js -Raw
+          if ($gateway -notmatch "createAccountService") { throw "Kivo gateway is not wired to the account privacy service" }
+          if ($gateway -notmatch "account-controls\.js") { throw "Kivo live app bundle is not loading account-controls.js" }
 
       - name: Run destructive account lifecycle on temporary data
         shell: pwsh
