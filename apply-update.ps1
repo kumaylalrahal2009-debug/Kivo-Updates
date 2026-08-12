@@ -27,7 +27,9 @@ for ($i = 0; $i -lt 40; $i++) {
   Start-Sleep -Milliseconds 500
 }
 if (Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) {
-  throw "Kivo did not shut down cleanly before update installation."
+  Write-UpdateLog "ERROR: Kivo did not shut down cleanly before update installation. No files were replaced."
+  Remove-Item $Zip -Force -ErrorAction SilentlyContinue
+  exit 1
 }
 
 $temp = Join-Path $env:TEMP ("kivo-update-" + [guid]::NewGuid().ToString("N"))
@@ -89,6 +91,7 @@ try {
     "smart-experience-v2.js",
     "lib\update-engine.js",
     "lib\account-service.js",
+    "lib\capture-parser.js",
     "public\index.html",
     "public\app.js",
     "public\styles.css",
@@ -115,6 +118,7 @@ try {
       "smart-experience-v2.js",
       "lib\update-engine.js",
       "lib\account-service.js",
+      "lib\capture-parser.js",
       "public\app.js",
       "public\premium.js",
       "public\smart-client.js",
