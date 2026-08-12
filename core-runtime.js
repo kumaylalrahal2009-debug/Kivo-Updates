@@ -9,6 +9,11 @@ function replaceRequired(label,pattern,replacement){
   const before=code;code=code.replace(pattern,replacement);
   if(code===before)throw new Error(`Kivo compatibility patch failed: ${label}`);
 }
+function replaceFunction(label,startMarker,endMarker,replacement){
+  const start=code.indexOf(startMarker),end=code.indexOf(endMarker,start);
+  if(start<0||end<=start)throw new Error(`Kivo compatibility patch failed: ${label} boundaries`);
+  code=code.slice(0,start)+replacement+'\n'+code.slice(end);
+}
 
 // The original prototype had starter admin constants. The official Kivo launcher
 // never executes those values: this adapter replaces them in memory with private
@@ -16,13 +21,23 @@ function replaceRequired(label,pattern,replacement){
 replaceRequired('admin email',/const ADMIN_EMAIL\s*=\s*'[^']*';/,"const ADMIN_EMAIL = process.env.KIVO_CORE_ADMIN_EMAIL || 'owner@kivo.local';");
 replaceRequired('admin password',/const ADMIN_PASSWORD\s*=\s*'[^']*';/,"const ADMIN_PASSWORD = process.env.KIVO_CORE_ADMIN_PASSWORD || ''; ");
 
-// Modern parser patch. Use deterministic source boundaries instead of a broad
-// regex so legacy formatting changes can never silently leave the old parser live.
-const parserStart=code.indexOf('function parseAmount(text){');
-const parserEnd=code.indexOf('function cleanTitle',parserStart);
-if(parserStart<0||parserEnd<=parserStart)throw new Error('Kivo compatibility patch failed: parseAmount boundaries');
-code=code.slice(0,parserStart)+"function parseAmount(text){ return require('./lib/capture-parser').parseAmount(text); }\n"+code.slice(parserEnd);
-if(!code.includes("require('./lib/capture-parser').parseAmount"))throw new Error('Kivo compatibility patch failed: guarded parser not installed');
+// Modern capture parser patch. Deterministic source boundaries mean a future
+// legacy formatting change fails startup instead of silently restoring stale parsing.
+replaceFunction(
+  'parseRecurrence',
+  'function parseRecurrence(text){',
+  'function parseReminderDays',
+  "function parseRecurrence(text){ return require('./lib/capture-parser').parseRecurrence(text); }"
+);
+replaceFunction(
+  'parseAmount',
+  'function parseAmount(text){',
+  'function cleanTitle',
+  "function parseAmount(text){ return require('./lib/capture-parser').parseAmount(text); }"
+);
+if(!code.includes("require('./lib/capture-parser').parseAmount")||!code.includes("require('./lib/capture-parser').parseRecurrence")){
+  throw new Error('Kivo compatibility patch failed: modern capture parser not installed');
+}
 
 // Kivo is a multi-process SQLite app. WAL + a busy timeout reduce lock contention
 // between the core, Smart v2, billing and privacy services.
