@@ -22,6 +22,7 @@ if(exists('secure-gateway.js')){
   /Content-Security-Policy/.test(gateway)&&/X-Frame-Options/.test(gateway)?ok('public gateway sets browser security headers'):fail('browser security headers are missing');
   /billing\/webhook/.test(gateway)&&/300/.test(gateway)?ok('Stripe webhook timestamp freshness check present'):fail('webhook replay freshness check missing');
   /MAX_BODY_BYTES/.test(gateway)&&/413/.test(gateway)?ok('public request-size boundary present'):fail('request-size boundary missing');
+  /money-intelligence\.js/.test(gateway)&&/account-controls\.js/.test(gateway)?ok('gateway app bundle includes Money Intelligence and account controls'):fail('live extension modules are not in the public app bundle');
 }
 
 if(exists('start-kivo.bat')){
@@ -84,8 +85,6 @@ if(exists('public/index.html')){
   for(const id of ['app','homeView','inboxView','moneyView','askView','chat','askInput','captureText','settingsDialog','adminDashboard']){
     html.includes(`id="${id}"`)?ok(`UI anchor #${id} exists`):fail(`required UI anchor #${id} missing`);
   }
-  /money-intelligence\.js/.test(html)?ok('Money Intelligence loads in the live app'):fail('Money Intelligence is not loaded by index.html');
-  /account-controls\.js/.test(html)?ok('account controls load in the live app'):fail('account controls are not loaded by index.html');
 }
 
 if(exists('public/smart-client.js')){
