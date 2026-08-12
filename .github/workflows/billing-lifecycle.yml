@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - "secure-gateway.js"
       - "bootstrap.js"
-      - "core-runtime.js"
       - "smart-experience-v2.js"
       - "public/premium.js"
       - "scripts/billing-webhook-smoke.js"
@@ -22,7 +22,7 @@ permissions:
 jobs:
   billing-lifecycle:
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Get Kivo source
         uses: actions/checkout@v5
@@ -30,8 +30,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          node --check secure-gateway.js
           node --check bootstrap.js
-          node --check smart-experience-v2.js
           node --check scripts/billing-webhook-smoke.js
       - name: Simulate signed Stripe billing lifecycle
         shell: pwsh
