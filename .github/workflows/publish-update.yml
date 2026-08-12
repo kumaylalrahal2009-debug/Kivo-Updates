@@ -24,7 +24,7 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 24
+    timeout-minutes: 26
 
     steps:
       - name: Get Kivo source
@@ -51,6 +51,7 @@ jobs:
           node --check public/account-controls.js
           node --check public/sw.js
           node --check scripts/release-smoke.js
+          node --check scripts/capture-parser-smoke.js
           node --check scripts/integration-smoke.js
           node --check scripts/update-integrity-smoke.js
           node --check scripts/account-lifecycle-smoke.js
@@ -85,6 +86,7 @@ jobs:
             "ensure-local-config.ps1",
             "show-owner-login.bat",
             "scripts/release-smoke.js",
+            "scripts/capture-parser-smoke.js",
             "scripts/integration-smoke.js",
             "scripts/update-integrity-smoke.js",
             "scripts/account-lifecycle-smoke.js",
@@ -100,6 +102,12 @@ jobs:
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "ensure-local-config.ps1"), [ref]$tokens, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count -gt 0) { throw "ensure-local-config.ps1 failed PowerShell parsing." }
+
+      - name: Fuzz human capture parsing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/capture-parser-smoke.js
 
       - name: Attack public security gateway
         shell: pwsh
@@ -181,6 +189,7 @@ jobs:
             commit = "${{ github.sha }}"
             security_gateway = $true
             security_gateway_tested = $true
+            capture_parser_tested = $true
             smart_experience = "v2"
             update_engine = "v2"
             secure_core = $true
