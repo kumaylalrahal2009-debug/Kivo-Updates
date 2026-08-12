@@ -1,10 +1,19 @@
-/* Kivo Experience Layer: memberships, billing UX and admin revenue */
+/* Kivo Experience Layer: memberships, billing UX, smart status and admin business health */
 (()=>{
   let billingState=null;
   let lastMembershipFetch=0;
   let membershipBusy=false;
+  let smartStatusBusy=false;
+  let lastSmartStatusFetch=0;
   const q=s=>document.querySelector(s);
   const money=n=>new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(Number(n||0));
+
+  async function jsonFetch(path,opt={}){
+    const r=await fetch(path,{credentials:'same-origin',...opt});
+    let d={};try{d=await r.json()}catch{}
+    if(!r.ok)throw new Error(d.error||'Request failed.');
+    return d;
+  }
 
   async function billingApi(path,opt={}){
     const headers={...(opt.headers||{})};
@@ -24,6 +33,13 @@
     card.id='membershipCard';card.className='membership-card';
     card.innerHTML=`<div class="membership-head"><div><span class="membership-eyebrow">MEMBERSHIP</span><strong id="membershipPlan">Kivo Free</strong></div><span id="membershipBadge" class="membership-badge free">FREE</span></div><p id="membershipCopy">Core Kivo is free.</p><div id="usageGrid" class="usage-grid"></div><div id="membershipActions" class="membership-actions"></div>`;
     logout.parentNode.insertBefore(card,logout);
+  }
+
+  function buildSmartStatusCard(){
+    const logout=q('#logoutBtn');if(!logout||q('#smartStatusCard'))return;
+    const card=document.createElement('section');card.id='smartStatusCard';card.className='smart-status-card';
+    card.innerHTML=`<div class="smart-status-head"><div><span>INTELLIGENCE</span><strong id="smartStatusTitle">Kivo Smart</strong></div><span id="smartStatusBadge" class="smart-status-badge">CHECKING</span></div><p id="smartStatusCopy">Checking the Kivo intelligence layer…</p><div id="smartStatusMetrics" class="smart-status-metrics"></div>`;
+    const membership=q('#membershipCard');if(membership)membership.insertAdjacentElement('beforebegin',card);else logout.parentNode.insertBefore(card,logout);
   }
 
   function renderMembership(d){
@@ -56,6 +72,22 @@
     finally{membershipBusy=false}
   }
 
+  async function refreshSmartStatus(force=false){
+    buildSmartStatusCard();
+    if(smartStatusBusy)return;
+    if(!force&&Date.now()-lastSmartStatusFetch<45000)return;
+    smartStatusBusy=true;
+    try{
+      const d=await jsonFetch('/api/smart/status');lastSmartStatusFetch=Date.now();
+      const title=q('#smartStatusTitle'),badge=q('#smartStatusBadge'),copy=q('#smartStatusCopy'),metrics=q('#smartStatusMetrics');if(!title)return;
+      const cloud=d.mode==='cloud+local';title.textContent=cloud?'Kivo Smart + Cloud AI':'Kivo Smart Local v2';badge.textContent='READY';badge.className='smart-status-badge ready';
+      copy.textContent=cloud?'Cloud reasoning is connected with Smart Local v2 standing by as a fallback.':'Smart Local v2 is active. It understands context, follow-ups and common typos without needing a cloud model.';
+      metrics.innerHTML=`<span><b>${d.open||0}</b><small>open</small></span><span><b>${d.overdue||0}</b><small>overdue</small></span><span><b>${d.items||0}</b><small>saved</small></span>`;
+    }catch{
+      const badge=q('#smartStatusBadge'),copy=q('#smartStatusCopy');if(badge){badge.textContent='STARTING';badge.className='smart-status-badge'}if(copy)copy.textContent='Kivo Smart is starting or this build predates the Smart v2 status endpoint.';
+    }finally{smartStatusBusy=false}
+  }
+
   async function startCheckout(interval,button){
     const old=button?.textContent;
     try{if(button){button.disabled=true;button.textContent='Opening secure checkout…'}const d=await billingApi('/api/billing/checkout',{method:'POST',body:JSON.stringify({interval})});if(d.url)location.href=d.url}
@@ -77,7 +109,7 @@
 
   function injectAccountPlanPill(){
     const top=q('.topbar-actions');if(!top||q('#accountPlanPill'))return;
-    const pill=document.createElement('button');pill.id='accountPlanPill';pill.className='account-plan-pill';pill.type='button';pill.textContent='FREE';pill.title='Membership';pill.setAttribute('aria-label','Open membership settings');pill.onclick=()=>{q('#settingsDialog')?.showModal();refreshMembership(true)};top.prepend(pill);
+    const pill=document.createElement('button');pill.id='accountPlanPill';pill.className='account-plan-pill';pill.type='button';pill.textContent='FREE';pill.title='Membership';pill.setAttribute('aria-label','Open membership settings');pill.onclick=()=>{q('#settingsDialog')?.showModal();refreshMembership(true);refreshSmartStatus(true)};top.prepend(pill);
   }
   function syncPlanPill(){const p=q('#accountPlanPill');if(p&&billingState){p.textContent=billingState.isPro?'PRO':'FREE';p.classList.toggle('pro',!!billingState.isPro)}}
 
@@ -86,6 +118,14 @@
     const panel=document.createElement('section');panel.id='adminRevenuePanel';panel.className='admin-revenue-wrap';panel.innerHTML=`<div class="admin-revenue-title"><div><span>BUSINESS</span><h2>Revenue & memberships</h2></div><span id="stripeConnection" class="stripe-status">Checking payments…</span></div><div id="revenueMetrics" class="revenue-metrics"></div><div class="revenue-note" id="revenueNote"></div>`;
     const header=dash.querySelector('.admin-header');if(header)header.insertAdjacentElement('afterend',panel);else dash.prepend(panel);
   }
+
+  function injectAdminHealth(){
+    const dash=q('#adminDashboard');if(!dash||q('#adminHealthPanel'))return;
+    const panel=document.createElement('section');panel.id='adminHealthPanel';panel.className='admin-health-panel';
+    panel.innerHTML=`<div class="admin-health-title"><div><span>PRODUCT HEALTH</span><h2>Kivo systems</h2></div><span id="adminHealthBadge" class="smart-status-badge">CHECKING</span></div><div id="adminHealthGrid" class="admin-health-grid"></div>`;
+    const revenue=q('#adminRevenuePanel');if(revenue)revenue.insertAdjacentElement('afterend',panel);else dash.querySelector('.admin-header')?.insertAdjacentElement('afterend',panel);
+  }
+
   async function loadAdminRevenue(){
     if(location.pathname.toLowerCase()!=='/admin'||document.hidden)return;
     injectAdminRevenue();
@@ -97,12 +137,24 @@
     }catch{}
   }
 
+  async function loadAdminHealth(){
+    if(location.pathname.toLowerCase()!=='/admin'||document.hidden)return;injectAdminHealth();
+    try{
+      const d=await jsonFetch('/api/admin/smart-health');const badge=q('#adminHealthBadge'),grid=q('#adminHealthGrid');if(!badge||!grid)return;
+      badge.textContent=d.ok?'HEALTHY':'CHECK';badge.className=`smart-status-badge ${d.ok?'ready':''}`;
+      grid.innerHTML=`<article><span>Smart engine</span><strong>${d.smartLayer||'—'}</strong><small>context + follow-ups</small></article><article><span>AI mode</span><strong>${d.aiConnected?'Cloud + local':'Local'}</strong><small>${d.aiModel||'Smart Local fallback'}</small></article><article><span>Database</span><strong>${d.database?'Ready':'Check'}</strong><small>local application data</small></article><article><span>Release</span><strong>${d.version?`v${d.version}`:'—'}</strong><small>installed build</small></article><article><span>AI memory</span><strong>${d.assistantMessages||0}</strong><small>recent stored messages</small></article><article><span>Events</span><strong>${d.analyticsEvents||0}</strong><small>analytics records</small></article>`;
+    }catch{
+      const badge=q('#adminHealthBadge');if(badge){badge.textContent='UNAVAILABLE';badge.className='smart-status-badge'}
+    }
+  }
+
   function observeApp(){
-    upgradePublicPricing();buildSettingsCard();injectAccountPlanPill();injectAdminRevenue();
-    q('#settingsBtn')?.addEventListener('click',()=>setTimeout(()=>refreshMembership(true),60));q('#desktopSettings')?.addEventListener('click',()=>setTimeout(()=>refreshMembership(true),60));
-    const refreshVisible=()=>{if(document.hidden)return;if(!q('#app')?.classList.contains('hidden'))refreshMembership();if(!q('#adminDashboard')?.classList.contains('hidden'))loadAdminRevenue()};
+    upgradePublicPricing();buildSettingsCard();buildSmartStatusCard();injectAccountPlanPill();injectAdminRevenue();injectAdminHealth();
+    const settingsRefresh=()=>setTimeout(()=>{refreshMembership(true);refreshSmartStatus(true)},60);
+    q('#settingsBtn')?.addEventListener('click',settingsRefresh);q('#desktopSettings')?.addEventListener('click',settingsRefresh);
+    const refreshVisible=()=>{if(document.hidden)return;if(!q('#app')?.classList.contains('hidden')){refreshMembership();refreshSmartStatus()}if(!q('#adminDashboard')?.classList.contains('hidden')){loadAdminRevenue();loadAdminHealth()}};
     document.addEventListener('visibilitychange',refreshVisible);window.addEventListener('focus',refreshVisible);
-    setInterval(refreshVisible,60000);setTimeout(()=>{refreshMembership(true);loadAdminRevenue()},900);
+    setInterval(refreshVisible,60000);setTimeout(()=>{refreshMembership(true);refreshSmartStatus(true);loadAdminRevenue();loadAdminHealth()},900);
     const params=new URLSearchParams(location.search);if(params.get('billing')==='success'&&typeof toast==='function')setTimeout(()=>toast('Payment completed. Kivo Pro will activate as soon as Stripe confirms it.','good'),600);if(params.get('billing')==='cancelled'&&typeof toast==='function')setTimeout(()=>toast('Checkout cancelled — nothing was charged.'),600);
   }
 
