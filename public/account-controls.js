@@ -1,6 +1,6 @@
 (()=>{
   const $=s=>document.querySelector(s);
-  const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'}[m]));
 
   function toastSafe(msg,type=''){try{if(typeof toast==='function')return toast(msg,type)}catch{};console.log('[Kivo]',msg)}
   function injectStyles(){
@@ -76,5 +76,50 @@
   }
 
   function init(){build();const settings=()=>setTimeout(build,30);$('#settingsBtn')?.addEventListener('click',settings);$('#desktopSettings')?.addEventListener('click',settings)}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+
+// Desktop startup updater. Kept separate from Smart UI so update logic can never replace
+// command search, onboarding, inbox filtering, focus cards or Ask Kivo behavior.
+(()=>{
+  let checked=false,installing=false,lastAttempt=0;
+  const toastSafe=(msg,type='')=>{try{if(typeof toast==='function')return toast(msg,type)}catch{};console.log('[Kivo updater]',msg)};
+  const loggedIn=()=>{try{return !!user&&!document.querySelector('#app')?.classList.contains('hidden')}catch{return false}};
+  const csrfToken=()=>{try{return String(user?.csrf||window.csrf||'')}catch{return''}};
+  async function checkForStartupUpdate(){
+    if(checked||installing||!navigator.onLine||!loggedIn())return;
+    const now=Date.now();if(now-lastAttempt<3000)return;lastAttempt=now;
+    try{
+      const r=await fetch('/api/update/check',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+      if(r.status===401)return;
+      const info=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(info.error||'Could not check GitHub for updates.');
+      checked=true;
+      if(!info.available)return;
+      const token=csrfToken();
+      if(!token){checked=false;return}
+      installing=true;
+      const version=info.latestVersion||'new version';
+      toastSafe(`Kivo ${version} is available. Installing automatically…`,'good');
+      const install=await fetch('/api/update/install',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:JSON.stringify({_csrf:token})});
+      const result=await install.json().catch(()=>({}));
+      if(!install.ok)throw new Error(result.error||'Automatic update could not start.');
+      document.documentElement.dataset.kivoUpdating='true';
+      toastSafe(`Installing Kivo ${result.version||version}. Kivo will restart automatically.`,'good');
+    }catch(err){
+      installing=false;checked=false;
+      console.warn('Kivo automatic startup update failed:',err);
+      toastSafe(err.message||'Automatic update check failed.','error');
+    }
+  }
+  const schedule=(delay=900)=>setTimeout(checkForStartupUpdate,delay);
+  function init(){
+    schedule(1000);
+    addEventListener('online',()=>{checked=false;schedule(400)});
+    addEventListener('pageshow',()=>schedule(700));
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)schedule(700)});
+    // Login can finish after this extension loads, so retry quietly for the first minute.
+    let tries=0;const timer=setInterval(()=>{tries++;if(loggedIn())checkForStartupUpdate();if(checked||tries>=20)clearInterval(timer)},3000);
+  }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
