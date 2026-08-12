@@ -1,0 +1,40 @@
+name: Kivo Billing Lifecycle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap.js"
+      - "core-runtime.js"
+      - "smart-experience-v2.js"
+      - "public/premium.js"
+      - "scripts/billing-webhook-smoke.js"
+      - ".github/workflows/billing-lifecycle.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: kivo-billing-lifecycle
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  billing-lifecycle:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - name: Get Kivo source
+        uses: actions/checkout@v5
+      - name: Validate billing test source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node --check bootstrap.js
+          node --check smart-experience-v2.js
+          node --check scripts/billing-webhook-smoke.js
+      - name: Simulate signed Stripe billing lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/billing-webhook-smoke.js
