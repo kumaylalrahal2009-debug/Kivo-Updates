@@ -8,8 +8,8 @@ const fail=msg=>{console.error(`KIVO RELEASE CHECK FAILED: ${msg}`);process.exit
 const ok=msg=>console.log(`✓ ${msg}`);
 
 const required=[
-  'server.js','bootstrap.js','experience.js','smart-experience-v2.js',
-  'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css',
+  'server.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js',
+  'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css','public/manifest.json','public/sw.js',
   'start-kivo.bat','apply-update.ps1','.gitignore'
 ];
 for(const file of required){exists(file)?ok(`found ${file}`):fail(`missing ${file}`)}
@@ -28,6 +28,14 @@ if(exists('smart-experience-v2.js')){
   /assistant\/history/.test(smart)?ok('assistant history API present'):fail('assistant history API missing');
   /admin\/smart-health/.test(smart)?ok('admin smart-health API present'):fail('admin smart-health API missing');
   /AbortController/.test(smart)?ok('cloud AI timeout fallback present'):fail('cloud AI timeout fallback missing');
+  /createUpdateEngine/.test(smart)?ok('Smart v2 owns updater engine'):fail('Smart v2 updater engine missing');
+}
+
+if(exists('lib/update-engine.js')){
+  const engine=read('lib/update-engine.js');
+  /releases\/latest/.test(engine)&&/releases\?per_page/.test(engine)?ok('updater has multiple release discovery paths'):fail('updater does not have multiple release discovery paths');
+  /Kivo-update\.zip/.test(engine)?ok('updater has release-asset fallback'):fail('update asset fallback missing');
+  /30000/.test(engine)?ok('update download timeout present'):fail('update download timeout missing');
 }
 
 if(exists('apply-update.ps1')){
@@ -54,7 +62,13 @@ if(exists('public/smart-client.js')){
   /kivoFocusCard/.test(client)?ok('priority focus card present'):fail('priority focus card missing');
 }
 
-const secretScanFiles=['server.js','bootstrap.js','experience.js','smart-experience-v2.js','public/app.js','public/premium.js','public/smart-client.js'];
+if(exists('public/sw.js')){
+  const sw=read('public/sw.js');
+  /pathname\.startsWith\('\/api\/'\)/.test(sw)?ok('PWA never caches private API responses'):fail('service worker may cache private API responses');
+  /app\.js/.test(sw)&&/styles\.css/.test(sw)?ok('PWA keeps live app bundles out of cache'):fail('PWA may hide app updates behind cached bundles');
+}
+
+const secretScanFiles=['server.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js','public/app.js','public/premium.js','public/smart-client.js'];
 for(const file of secretScanFiles){
   if(!exists(file))continue;
   const text=read(file);
