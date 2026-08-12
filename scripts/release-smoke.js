@@ -19,8 +19,12 @@ if(exists('secure-gateway.js')){
   /smart-experience-v2\.js/.test(gateway)?ok('security gateway launches Smart Experience v2'):fail('gateway does not launch Smart Experience v2');
   /NODE_OPTIONS/.test(gateway)&&/force-loopback\.js/.test(gateway)?ok('gateway forces internal Node services onto loopback'):fail('gateway does not propagate loopback isolation');
   /createAccountService/.test(gateway)&&/api\/account/.test(gateway)?ok('gateway owns explicit account privacy routes'):fail('gateway is not wired to the account privacy service');
+  /createUpdateEngine/.test(gateway)&&/api\/update\/check/.test(gateway)&&/api\/update\/install/.test(gateway)?ok('gateway owns authenticated update routes'):fail('public updater is not owned by the gateway');
+  /updater\.install\(process\.pid\)/.test(gateway)?ok('installer waits on the public gateway PID'):fail('updater is not tied to the gateway lifecycle');
+  /taskkill/.test(gateway)&&/stopInnerTree/.test(gateway)?ok('Windows update shutdown terminates the full inner process tree'):fail('gateway does not terminate the inner process tree before update');
   /RateLimit-Limit/.test(gateway)&&/429/.test(gateway)?ok('public gateway has request rate limiting'):fail('public rate limiting is missing');
   /Content-Security-Policy/.test(gateway)&&/X-Frame-Options/.test(gateway)?ok('public gateway sets browser security headers'):fail('browser security headers are missing');
+  /blocked=new Set/.test(gateway)&&/toLowerCase/.test(gateway)?ok('gateway replaces upstream security headers case-insensitively'):fail('security headers may be duplicated by upstream casing');
   /billing\/webhook/.test(gateway)&&/300/.test(gateway)?ok('Stripe webhook timestamp freshness check present'):fail('webhook replay freshness check missing');
   /MAX_BODY_BYTES/.test(gateway)&&/413/.test(gateway)?ok('public request-size boundary present'):fail('request-size boundary missing');
   /money-intelligence\.js/.test(gateway)&&/account-controls\.js/.test(gateway)?ok('gateway app bundle includes Money Intelligence and account controls'):fail('live extension modules are not in the public app bundle');
@@ -58,6 +62,7 @@ if(exists('lib/account-service.js')){
   /method==='DELETE'/.test(account)&&/pathname==='\/api\/account'/.test(account)?ok('permanent account deletion endpoint is explicit'):fail('account deletion endpoint missing');
   /pbkdf2Sync/.test(account)&&/current_password/.test(account)?ok('password change re-verifies the current password'):fail('password re-verification is missing');
   /BEGIN IMMEDIATE/.test(account)&&/ROLLBACK/.test(account)?ok('destructive account changes use transactions'):fail('account transaction protection missing');
+  /sessionFor/.test(account)&&/csrfValid/.test(account)?ok('gateway services reuse authenticated session and CSRF helpers'):fail('gateway auth helpers are missing');
   /password_hash/.test(account)&&!/SELECT \* FROM users/.test(account)?ok('account export avoids broad user-record selection'):fail('account export may expose unnecessary user fields');
 }
 
@@ -69,7 +74,6 @@ if(exists('smart-experience-v2.js')){
   /assistant\/history/.test(smart)?ok('assistant history API present'):fail('assistant history API missing');
   /admin\/smart-health/.test(smart)?ok('admin smart-health API present'):fail('admin smart-health API missing');
   /AbortController/.test(smart)?ok('cloud AI timeout fallback present'):fail('cloud AI timeout fallback missing');
-  /createUpdateEngine/.test(smart)?ok('Smart v2 owns updater engine'):fail('Smart v2 updater engine missing');
 }
 
 if(exists('lib/update-engine.js')){
@@ -81,12 +85,15 @@ if(exists('lib/update-engine.js')){
 }
 
 if(exists('apply-update.ps1')){
-  const updater=read('apply-update.ps1');
-  for(const protectedName of ['data','uploads','updates','backups','business-config.bat']){
-    updater.toLowerCase().includes(protectedName.toLowerCase())?ok(`updater references protected ${protectedName}`):fail(`updater does not protect/reference ${protectedName}`);
+  const updateScript=read('apply-update.ps1');
+  for(const protectedName of ['data','uploads','updates','backups','business-config.bat','owner-login.txt']){
+    updateScript.toLowerCase().includes(protectedName.toLowerCase())?ok(`updater references protected ${protectedName}`):fail(`updater does not protect/reference ${protectedName}`);
   }
-  /Restore-Rollback/.test(updater)?ok('failed updates have rollback recovery'):fail('update rollback recovery missing');
-  /JavaScript validation failed/.test(updater)?ok('update package is syntax-checked before install'):fail('pre-install JS validation missing');
+  /secure-gateway\.js/.test(updateScript)&&/account-service\.js/.test(updateScript)?ok('installer requires the secured gateway architecture'):fail('installer can accept a package missing gateway/account service');
+  /money-intelligence\.js/.test(updateScript)&&/account-controls\.js/.test(updateScript)?ok('installer requires live Money and Account modules'):fail('installer can accept a package missing live extension modules');
+  /did not shut down cleanly/.test(updateScript)?ok('installer refuses to replace files while Kivo is still running'):fail('installer may replace files while gateway remains alive');
+  /Restore-Rollback/.test(updateScript)?ok('failed updates have rollback recovery'):fail('update rollback recovery missing');
+  /JavaScript validation failed/.test(updateScript)?ok('update package is syntax-checked before install'):fail('pre-install JS validation missing');
 }
 
 if(exists('public/index.html')){
