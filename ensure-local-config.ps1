@@ -35,7 +35,13 @@ if (Test-Path $config) { exit 0 }
 
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 $bytes = New-Object byte[] 24
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+  $rng.GetBytes($bytes)
+}
+finally {
+  if ($null -ne $rng) { $rng.Dispose() }
+}
 $password = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
 
 @"
