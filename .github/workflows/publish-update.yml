@@ -38,6 +38,7 @@ jobs:
           node --check public/app.js
           node --check public/premium.js
           node --check public/smart-client.js
+          node scripts/release-smoke.js
 
           $required = @(
             "server.js",
