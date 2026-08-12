@@ -1,10 +1,11 @@
-/* Kivo Experience Layer: memberships, billing UX, smart status and admin business health */
+/* Kivo Experience Layer: memberships, billing UX, smart status, PWA and admin business health */
 (()=>{
   let billingState=null;
   let lastMembershipFetch=0;
   let membershipBusy=false;
   let smartStatusBusy=false;
   let lastSmartStatusFetch=0;
+  let deferredInstallPrompt=null;
   const q=s=>document.querySelector(s);
   const money=n=>new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(Number(n||0));
 
@@ -40,6 +41,32 @@
     const card=document.createElement('section');card.id='smartStatusCard';card.className='smart-status-card';
     card.innerHTML=`<div class="smart-status-head"><div><span>INTELLIGENCE</span><strong id="smartStatusTitle">Kivo Smart</strong></div><span id="smartStatusBadge" class="smart-status-badge">CHECKING</span></div><p id="smartStatusCopy">Checking the Kivo intelligence layer…</p><div id="smartStatusMetrics" class="smart-status-metrics"></div>`;
     const membership=q('#membershipCard');if(membership)membership.insertAdjacentElement('beforebegin',card);else logout.parentNode.insertBefore(card,logout);
+  }
+
+  function isStandalone(){return window.matchMedia?.('(display-mode: standalone)').matches||window.navigator.standalone===true}
+  function buildInstallCard(){
+    const logout=q('#logoutBtn');if(!logout||q('#installKivoCard'))return;
+    const card=document.createElement('section');card.id='installKivoCard';card.className='install-kivo-card';
+    card.innerHTML=`<div class="install-kivo-copy"><span>APP MODE</span><strong id="installKivoTitle">${isStandalone()?'Kivo is installed':'Install Kivo'}</strong><p id="installKivoCopy">${isStandalone()?'You’re running Kivo in its standalone app window.':'Install Kivo from your browser for a cleaner phone-style app window.'}</p></div><button id="installKivoBtn" type="button" class="billing-secondary">${isStandalone()?'Installed':'Install'}</button>`;
+    const smart=q('#smartStatusCard');if(smart)smart.insertAdjacentElement('afterend',card);else logout.parentNode.insertBefore(card,logout);
+    q('#installKivoBtn').onclick=installKivo;
+    syncInstallCard();
+  }
+  function syncInstallCard(){
+    const btn=q('#installKivoBtn'),title=q('#installKivoTitle'),copy=q('#installKivoCopy');if(!btn)return;
+    if(isStandalone()){btn.textContent='Installed';btn.disabled=true;title.textContent='Kivo is installed';copy.textContent='You’re running Kivo in its standalone app window.';return}
+    btn.disabled=!deferredInstallPrompt;btn.textContent=deferredInstallPrompt?'Install':'Use browser menu';
+    copy.textContent=deferredInstallPrompt?'Install Kivo for a cleaner standalone app window.':'If your browser supports app installation, use its Install app option. Kivo is PWA-ready.';
+  }
+  async function installKivo(){
+    if(isStandalone())return;
+    if(!deferredInstallPrompt){if(typeof toast==='function')toast('Use your browser’s “Install app” option if it is available.');return}
+    try{deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice}catch{}finally{deferredInstallPrompt=null;syncInstallCard()}
+  }
+  function installPwaSupport(){
+    window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;buildInstallCard();syncInstallCard()});
+    window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;syncInstallCard();if(typeof toast==='function')toast('Kivo installed.','good')});
+    window.addEventListener('load',()=>setTimeout(async()=>{if(!('serviceWorker'in navigator))return;try{await navigator.serviceWorker.register('/sw.js',{scope:'/'});console.log('Kivo PWA ready')}catch(err){console.warn('Kivo PWA registration:',err.message)}},1400),{once:true});
   }
 
   function renderMembership(d){
@@ -149,8 +176,8 @@
   }
 
   function observeApp(){
-    upgradePublicPricing();buildSettingsCard();buildSmartStatusCard();injectAccountPlanPill();injectAdminRevenue();injectAdminHealth();
-    const settingsRefresh=()=>setTimeout(()=>{refreshMembership(true);refreshSmartStatus(true)},60);
+    installPwaSupport();upgradePublicPricing();buildSettingsCard();buildSmartStatusCard();buildInstallCard();injectAccountPlanPill();injectAdminRevenue();injectAdminHealth();
+    const settingsRefresh=()=>setTimeout(()=>{refreshMembership(true);refreshSmartStatus(true);syncInstallCard()},60);
     q('#settingsBtn')?.addEventListener('click',settingsRefresh);q('#desktopSettings')?.addEventListener('click',settingsRefresh);
     const refreshVisible=()=>{if(document.hidden)return;if(!q('#app')?.classList.contains('hidden')){refreshMembership();refreshSmartStatus()}if(!q('#adminDashboard')?.classList.contains('hidden')){loadAdminRevenue();loadAdminHealth()}};
     document.addEventListener('visibilitychange',refreshVisible);window.addEventListener('focus',refreshVisible);
