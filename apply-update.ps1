@@ -26,6 +26,9 @@ for ($i = 0; $i -lt 40; $i++) {
   if (-not $p) { break }
   Start-Sleep -Milliseconds 500
 }
+if (Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) {
+  throw "Kivo did not shut down cleanly before update installation."
+}
 
 $temp = Join-Path $env:TEMP ("kivo-update-" + [guid]::NewGuid().ToString("N"))
 $backupRoot = Join-Path $AppDir "backups"
@@ -34,6 +37,7 @@ New-Item -ItemType Directory -Force -Path $temp | Out-Null
 New-Item -ItemType Directory -Force -Path $backup | Out-Null
 
 $rollbackNames = @(
+  "secure-gateway.js",
   "server.js",
   "core-runtime.js",
   "force-loopback.js",
@@ -78,16 +82,21 @@ try {
 
   $required = @(
     "start-kivo.bat",
+    "secure-gateway.js",
     "core-runtime.js",
     "force-loopback.js",
     "bootstrap.js",
     "smart-experience-v2.js",
     "lib\update-engine.js",
+    "lib\account-service.js",
     "public\index.html",
     "public\app.js",
     "public\styles.css",
     "public\premium.js",
     "public\smart-client.js",
+    "public\money-intelligence.js",
+    "public\account-controls.js",
+    "public\sw.js",
     "version.json"
   )
   foreach ($relative in $required) {
@@ -96,7 +105,23 @@ try {
 
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($node) {
-    foreach ($relative in @("server.js","core-runtime.js","force-loopback.js","bootstrap.js","experience.js","smart-experience-v2.js","lib\update-engine.js","public\app.js","public\premium.js","public\smart-client.js","public\sw.js")) {
+    foreach ($relative in @(
+      "secure-gateway.js",
+      "server.js",
+      "core-runtime.js",
+      "force-loopback.js",
+      "bootstrap.js",
+      "experience.js",
+      "smart-experience-v2.js",
+      "lib\update-engine.js",
+      "lib\account-service.js",
+      "public\app.js",
+      "public\premium.js",
+      "public\smart-client.js",
+      "public\money-intelligence.js",
+      "public\account-controls.js",
+      "public\sw.js"
+    )) {
       $candidate = Join-Path $sourceRoot $relative
       if (Test-Path $candidate) {
         & node --check $candidate
@@ -105,7 +130,7 @@ try {
     }
   }
 
-  $protected = @("data","uploads","updates","backups",".git",".env","business-config.bat")
+  $protected = @("data","uploads","updates","backups",".git",".env","business-config.bat","owner-login.txt")
   Get-ChildItem $sourceRoot | ForEach-Object {
     if ($protected -notcontains $_.Name) {
       $destination = Join-Path $AppDir $_.Name
