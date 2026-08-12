@@ -1,19 +1,24 @@
 const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
-const {spawn}=require('node:child_process');
+const {spawn,spawnSync}=require('node:child_process');
 const {createAccountService}=require('./lib/account-service');
+const {createUpdateEngine}=require('./lib/update-engine');
 
 const ROOT=__dirname;
 const PUBLIC_PORT=Number(process.env.PORT||8488);
 const APP_PORT=Number(process.env.KIVO_GATEWAY_INNER_PORT||(PUBLIC_PORT+8));
 const DATA=path.resolve(process.env.KIVO_DATA_DIR||path.join(ROOT,'data'));
 const UPLOADS=path.resolve(process.env.KIVO_UPLOAD_DIR||path.join(ROOT,'uploads'));
+const UPDATE_REPO=process.env.KIVO_UPDATE_REPO||'kumaylalrahal2009-debug/Kivo-Updates';
+const LOCAL_DESKTOP=String(process.env.KIVO_LOCAL_DESKTOP||'false').toLowerCase()==='true';
 const MAX_BODY_BYTES=Math.max(1024*1024,Number(process.env.KIVO_MAX_REQUEST_BYTES||8*1024*1024));
 const LOOPBACK_PRELOAD='./force-loopback.js';
 fs.mkdirSync(DATA,{recursive:true});fs.mkdirSync(UPLOADS,{recursive:true});
 const accountService=createAccountService({dataDir:DATA,uploadsDir:UPLOADS,secureCookies:String(process.env.SECURE_COOKIES||'false').toLowerCase()==='true'});
+const updater=createUpdateEngine({root:ROOT,repo:UPDATE_REPO,localDesktop:LOCAL_DESKTOP});
 const buckets=new Map();
+let plannedShutdown=false;
 
 function clientIp(req){
   if(String(process.env.KIVO_TRUST_PROXY||'false').toLowerCase()==='true'){
@@ -41,9 +46,9 @@ function securityHeaders(req){
   if(isSecure(req))h['Strict-Transport-Security']='max-age=31536000; includeSubDomains';
   return h;
 }
-function json(res,status,obj,extra={}){
+function json(req,res,status,obj,extra={}){
   if(res.headersSent)return;
-  res.writeHead(status,{...securityHeaders({socket:{encrypted:false},headers:{}}),'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...extra});
+  res.writeHead(status,{...securityHeaders(req),'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...extra});
   res.end(JSON.stringify(obj));
 }
 function serviceResult(req,res,result){
@@ -55,6 +60,7 @@ function policy(method,pathname){
   if(method==='POST'&&(pathname==='/api/login'||pathname==='/api/register'))return{name:'auth',limit:12,windowMs:10*60*1000};
   if(method==='POST'&&pathname==='/api/account/password')return{name:'password',limit:8,windowMs:10*60*1000};
   if(method==='DELETE'&&pathname==='/api/account')return{name:'account-delete',limit:8,windowMs:10*60*1000};
+  if(method==='POST'&&pathname==='/api/update/install')return{name:'update-install',limit:6,windowMs:10*60*1000};
   if(reqPathSmart(pathname)&&method==='POST')return{name:'smart-actions',limit:90,windowMs:60*1000};
   if(method==='POST'&&(pathname==='/api/billing/checkout'||pathname==='/api/billing/portal'))return{name:'billing-actions',limit:30,windowMs:60*1000};
   if(pathname.startsWith('/api/')&&method!=='GET'&&method!=='HEAD')return{name:'api-write',limit:180,windowMs:60*1000};
@@ -76,7 +82,7 @@ function rateLimit(req,res,url){
   res.setHeader('RateLimit-Reset',String(seconds));
   if(state.allowed)return false;
   res.setHeader('Retry-After',String(seconds));
-  json(res,429,{error:'Too many requests. Wait a little and try again.'});
+  json(req,res,429,{error:'Too many requests. Wait a little and try again.'});
   return true;
 }
 function webhookTimestampFresh(req,url){
@@ -87,8 +93,11 @@ function webhookTimestampFresh(req,url){
   return Math.abs(Math.floor(Date.now()/1000)-stamp)<=300;
 }
 function copyResponseHeaders(req,headers){
-  const out={...headers,...securityHeaders(req)};
-  delete out['server'];delete out['x-powered-by'];
+  const authoritative=securityHeaders(req);
+  const blocked=new Set(['server','x-powered-by',...Object.keys(authoritative).map(k=>k.toLowerCase())]);
+  const out={};
+  for(const [key,value] of Object.entries(headers||{}))if(!blocked.has(key.toLowerCase()))out[key]=value;
+  Object.assign(out,authoritative);
   return out;
 }
 function forwardedHeaders(req){
@@ -103,14 +112,14 @@ function proxyBuffered(req,res,body){
   const p=http.request({hostname:'127.0.0.1',port:APP_PORT,path:req.url,method:req.method,headers},inner=>{
     res.writeHead(inner.statusCode||500,copyResponseHeaders(req,inner.headers));inner.pipe(res);
   });
-  p.on('error',()=>json(res,503,{error:'Kivo is starting. Try again in a moment.'}));
+  p.on('error',()=>json(req,res,503,{error:'Kivo is starting. Try again in a moment.'}));
   p.end(body);
 }
 function proxyStreaming(req,res){
   const p=http.request({hostname:'127.0.0.1',port:APP_PORT,path:req.url,method:req.method,headers:forwardedHeaders(req)},inner=>{
     res.writeHead(inner.statusCode||500,copyResponseHeaders(req,inner.headers));inner.pipe(res);
   });
-  p.on('error',()=>json(res,503,{error:'Kivo is starting. Try again in a moment.'}));
+  p.on('error',()=>json(req,res,503,{error:'Kivo is starting. Try again in a moment.'}));
   req.pipe(p);
 }
 function proxyAppBundle(req,res){
@@ -121,51 +130,93 @@ function proxyAppBundle(req,res){
         try{
           const additions=['money-intelligence.js','account-controls.js'].map(name=>fs.readFileSync(path.join(ROOT,'public',name),'utf8')).join('\n\n');
           body=Buffer.from(body.toString('utf8')+'\n\n'+additions,'utf8');
-        }catch(err){return json(res,500,{error:`Kivo app extension is missing: ${err.message}`})}
+        }catch(err){return json(req,res,500,{error:`Kivo app extension is missing: ${err.message}`})}
       }
       const headers=copyResponseHeaders(req,inner.headers);delete headers['content-encoding'];delete headers['transfer-encoding'];headers['content-type']='application/javascript; charset=utf-8';headers['cache-control']='no-store, max-age=0';headers['content-length']=String(body.length);
       res.writeHead(inner.statusCode||500,headers);res.end(body);
     });
   });
-  p.on('error',()=>json(res,503,{error:'Kivo is starting. Try again in a moment.'}));p.end();
+  p.on('error',()=>json(req,res,503,{error:'Kivo is starting. Try again in a moment.'}));p.end();
 }
 async function readBody(req){
   const declared=Number(req.headers['content-length']||0);if(declared>MAX_BODY_BYTES)throw Object.assign(new Error('too_large'),{code:'too_large'});
   const chunks=[];let total=0;for await(const chunk of req){total+=chunk.length;if(total>MAX_BODY_BYTES)throw Object.assign(new Error('too_large'),{code:'too_large'});chunks.push(chunk)}return Buffer.concat(chunks);
 }
+function parseBody(body){if(!body||!body.length)return{};try{return JSON.parse(body.toString('utf8'))}catch{return null}}
+function requireUser(req,res){
+  const s=accountService.sessionFor(req);if(s)return s;
+  json(req,res,401,{error:'Please log in.'});return null;
+}
+async function updateCheck(req,res){
+  if(!requireUser(req,res))return;
+  const info=await updater.check();
+  if(info.error)return json(req,res,502,{...info,error:info.error});
+  return json(req,res,200,info);
+}
+async function updateInstall(req,res,body){
+  const s=requireUser(req,res);if(!s)return;
+  const parsed=parseBody(body);if(parsed===null)return json(req,res,400,{error:'Invalid request.'});
+  if(!accountService.csrfValid(req,parsed,s))return json(req,res,403,{error:'Security token expired. Refresh Kivo and try again.'});
+  if(!LOCAL_DESKTOP)return json(req,res,403,{error:'Self-updates are only enabled in the local desktop build.'});
+  try{
+    const result=await updater.install(process.pid);
+    json(req,res,200,result);
+    setTimeout(()=>shutdown(0),800).unref();
+  }catch(err){json(req,res,500,{error:err.message||'Kivo could not install the update.'})}
+}
 
 const childNodeOptions=[process.env.NODE_OPTIONS||'',`--require=${LOOPBACK_PRELOAD}`].filter(Boolean).join(' ').trim();
 const child=spawn(process.execPath,['--no-warnings','smart-experience-v2.js'],{
   cwd:ROOT,
-  env:{...process.env,PORT:String(APP_PORT),KIVO_SMART_INNER_PORT:String(APP_PORT+4),NODE_OPTIONS:childNodeOptions},
-  stdio:['ignore','inherit','inherit']
+  env:{...process.env,PORT:String(APP_PORT),KIVO_SMART_INNER_PORT:String(APP_PORT+4),KIVO_GATEWAY_OWNS_UPDATES:'true',NODE_OPTIONS:childNodeOptions},
+  stdio:['ignore','inherit','inherit'],
+  detached:process.platform!=='win32'
 });
-child.on('exit',code=>{console.log(`Kivo secured app exited (${code??0}).`);process.exit(code??0)});
+child.on('exit',code=>{
+  if(plannedShutdown)return;
+  console.log(`Kivo secured app exited unexpectedly (${code??0}).`);
+  shutdown(code||1);
+});
 
 const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);
     if(rateLimit(req,res,url))return;
-    if(!webhookTimestampFresh(req,url))return json(res,400,{error:'Stripe webhook timestamp is too old or too far in the future.'});
+    if(!webhookTimestampFresh(req,url))return json(req,res,400,{error:'Stripe webhook timestamp is too old or too far in the future.'});
     if(req.method==='GET'&&url.pathname==='/app.js')return proxyAppBundle(req,res);
     if(req.method==='GET'&&url.pathname==='/api/account/export')return serviceResult(req,res,await accountService.handle(req,url,null));
+    if(req.method==='GET'&&url.pathname==='/api/update/check')return updateCheck(req,res);
     const method=req.method||'GET';
     if(['POST','PUT','PATCH','DELETE'].includes(method)){
       const body=await readBody(req);
       if(url.pathname.startsWith('/api/account'))return serviceResult(req,res,await accountService.handle(req,url,body));
+      if(method==='POST'&&url.pathname==='/api/update/install')return updateInstall(req,res,body);
       return proxyBuffered(req,res,body);
     }
     return proxyStreaming(req,res);
   }catch(err){
-    if(err?.code==='too_large')return json(res,413,{error:`Request is too large. Maximum size is ${Math.floor(MAX_BODY_BYTES/1024/1024)} MB.`});
-    console.error('Kivo security gateway:',err);return json(res,500,{error:'Kivo could not complete that request.'});
+    if(err?.code==='too_large')return json(req,res,413,{error:`Request is too large. Maximum size is ${Math.floor(MAX_BODY_BYTES/1024/1024)} MB.`});
+    console.error('Kivo security gateway:',err);return json(req,res,500,{error:'Kivo could not complete that request.'});
   }
 });
 server.requestTimeout=30000;
 server.headersTimeout=15000;
 server.keepAliveTimeout=5000;
-server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Security Gateway: http://localhost:${PUBLIC_PORT}\nProtected Smart v2: 127.0.0.1:${APP_PORT}\nRate limits, hardened headers, account privacy controls, request limits and webhook replay protection enabled.\n`));
+server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Security Gateway: http://localhost:${PUBLIC_PORT}\nProtected Smart v2: 127.0.0.1:${APP_PORT}\nRate limits, hardened headers, account privacy controls, gateway-owned updates, request limits and webhook replay protection enabled.\n`));
 
-function shutdown(){try{server.close()}catch{};try{accountService.close()}catch{};try{child.kill()}catch{};setTimeout(()=>process.exit(0),500).unref()}
-process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
+function stopInnerTree(){
+  if(!child||child.exitCode!==null)return;
+  try{
+    if(process.platform==='win32')spawnSync('taskkill',['/pid',String(child.pid),'/t','/f'],{stdio:'ignore',windowsHide:true});
+    else process.kill(-child.pid,'SIGTERM');
+  }catch{try{child.kill('SIGTERM')}catch{}}
+}
+function shutdown(exitCode=0){
+  if(plannedShutdown)return;plannedShutdown=true;
+  try{server.close()}catch{};
+  try{accountService.close()}catch{};
+  stopInnerTree();
+  setTimeout(()=>process.exit(exitCode),350).unref();
+}
+process.on('SIGINT',()=>shutdown(0));process.on('SIGTERM',()=>shutdown(0));
 setInterval(()=>{const t=Date.now();for(const[k,b]of buckets)if(t>b.resetAt+60000)buckets.delete(k)},60000).unref();
