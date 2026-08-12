@@ -44,13 +44,15 @@ REM Reuse an already-running Kivo instead of creating duplicate service layers.
 powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://localhost:%PORT%/api/admin/me; if($r.StatusCode -eq 200){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>nul
 if not errorlevel 1 (
   echo Kivo is already running. Opening it now...
-  start "" "http://localhost:%PORT%/app?build=smart-2"
+  start "" "http://localhost:%PORT%/app?build=secure-smart-2"
   exit
 )
 
 echo.
-echo Starting Kivo Smart Experience v2...
+echo Starting secured Kivo Smart Experience v2...
 echo Local app: http://localhost:%PORT%
+echo Security gateway: enabled
+echo Internal services: loopback only
 echo.
 if defined OPENAI_API_KEY (
   echo Intelligence: Cloud AI + Smart Local fallback
@@ -69,10 +71,16 @@ if defined STRIPE_SECRET_KEY (
 )
 echo.
 
-start "Kivo - keep this open" cmd /k "cd /d ""%~dp0"" && set PORT=%PORT% && set KIVO_LOCAL_DESKTOP=%KIVO_LOCAL_DESKTOP% && set KIVO_UPDATE_REPO=%KIVO_UPDATE_REPO% && set ""KIVO_DATA_DIR=%KIVO_DATA_DIR%"" && set ""KIVO_UPLOAD_DIR=%KIVO_UPLOAD_DIR%"" && node --no-warnings smart-experience-v2.js"
+if not exist "%~dp0secure-gateway.js" (
+  echo ERROR: secure-gateway.js is missing. Update or reinstall Kivo.
+  pause
+  exit /b 1
+)
+
+start "Kivo - keep this open" cmd /k "cd /d ""%~dp0"" && set PORT=%PORT% && set KIVO_LOCAL_DESKTOP=%KIVO_LOCAL_DESKTOP% && set KIVO_UPDATE_REPO=%KIVO_UPDATE_REPO% && set ""KIVO_DATA_DIR=%KIVO_DATA_DIR%"" && set ""KIVO_UPLOAD_DIR=%KIVO_UPLOAD_DIR%"" && node --no-warnings secure-gateway.js"
 
 echo Waiting for Kivo...
-for /l %%i in (1,1,35) do (
+for /l %%i in (1,1,40) do (
   powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://localhost:%PORT%/api/admin/me; if($r.StatusCode -eq 200){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>nul
   if not errorlevel 1 goto READY
   timeout /t 1 /nobreak >nul
@@ -85,6 +93,6 @@ pause
 exit /b 1
 
 :READY
-echo Kivo is ready.
-start "" "http://localhost:%PORT%/app?build=smart-2"
+echo Kivo is ready and protected by the security gateway.
+start "" "http://localhost:%PORT%/app?build=secure-smart-2"
 exit
