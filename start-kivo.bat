@@ -22,12 +22,12 @@ if exist "%~dp0business-config.bat" call "%~dp0business-config.bat"
 if not exist "%KIVO_DATA_DIR%" mkdir "%KIVO_DATA_DIR%"
 if not exist "%KIVO_UPLOAD_DIR%" mkdir "%KIVO_UPLOAD_DIR%"
 
-echo Starting Kivo Smart Experience on port %PORT%...
-echo Accounts and saved data persist in: %KIVO_DATA_DIR%
+echo Starting Kivo Smart Experience v2 on port %PORT%...
+echo Data directory: %KIVO_DATA_DIR%
 if defined OPENAI_API_KEY (
-  echo Kivo intelligence: cloud + local fallback
+  echo Kivo intelligence: cloud + smart local fallback
 ) else (
-  echo Kivo intelligence: smart local mode
+  echo Kivo intelligence: Smart Local v2
 )
 if defined STRIPE_SECRET_KEY (
   echo Business billing: configured
@@ -35,7 +35,7 @@ if defined STRIPE_SECRET_KEY (
   echo Business billing: demo mode - see BILLING_SETUP.md
 )
 
-start "Kivo - keep this open" cmd /k "cd /d ""%~dp0"" && set PORT=%PORT% && set KIVO_LOCAL_DESKTOP=%KIVO_LOCAL_DESKTOP% && set KIVO_UPDATE_REPO=%KIVO_UPDATE_REPO% && set ""KIVO_DATA_DIR=%KIVO_DATA_DIR%"" && set ""KIVO_UPLOAD_DIR=%KIVO_UPLOAD_DIR%"" && node --no-warnings smart-experience.js"
+start "Kivo - keep this open" cmd /k "cd /d ""%~dp0"" && set PORT=%PORT% && set KIVO_LOCAL_DESKTOP=%KIVO_LOCAL_DESKTOP% && set KIVO_UPDATE_REPO=%KIVO_UPDATE_REPO% && set ""KIVO_DATA_DIR=%KIVO_DATA_DIR%"" && set ""KIVO_UPLOAD_DIR=%KIVO_UPLOAD_DIR%"" && node --no-warnings smart-experience-v2.js"
 
 echo Waiting for Kivo...
 for /l %%i in (1,1,30) do (
@@ -51,5 +51,5 @@ exit /b 1
 
 :READY
 echo Kivo is ready.
-start "" "http://localhost:%PORT%/app?build=smart-1"
+start "" "http://localhost:%PORT%/app?build=smart-2"
 exit
