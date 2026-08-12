@@ -87,7 +87,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           node scripts/integration-smoke.js
 
-      - name: Build update package
+      - name: Build and inspect update package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -133,11 +133,38 @@ jobs:
             secure_core = $true
             first_run_owner_setup = $true
             e2e_tested = $true
+            checksum = "sha256"
             built_at = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json | Set-Content dist\package\version.json -Encoding UTF8
 
           Compress-Archive -Path dist\package\* -DestinationPath dist\Kivo-update.zip -Force
           if ((Get-Item dist\Kivo-update.zip).Length -lt 1024) { throw "Kivo update package is unexpectedly small." }
+
+          # Inspect the exact ZIP that users will receive, not just the source tree.
+          $verify = Join-Path $PWD "dist\verify"
+          Expand-Archive -Path dist\Kivo-update.zip -DestinationPath $verify -Force
+          foreach ($relative in @(
+            "version.json",
+            "start-kivo.bat",
+            "bootstrap.js",
+            "core-runtime.js",
+            "force-loopback.js",
+            "smart-experience-v2.js",
+            "lib\update-engine.js",
+            "public\index.html",
+            "public\app.js",
+            "public\smart-client.js",
+            "public\sw.js"
+          )) {
+            if (-not (Test-Path (Join-Path $verify $relative))) { throw "Final release ZIP is missing $relative" }
+          }
+          foreach ($private in @("data","uploads","updates","backups","business-config.bat","owner-login.txt",".env")) {
+            if (Test-Path (Join-Path $verify $private)) { throw "Private runtime content leaked into release ZIP: $private" }
+          }
+
+          $digest = (Get-FileHash dist\Kivo-update.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  Kivo-update.zip" | Set-Content dist\Kivo-update.sha256.txt -Encoding ASCII
+          Write-Host "Kivo update SHA-256: $digest"
 
           "KIVO_VERSION=$version" >> $env:GITHUB_ENV
           "KIVO_TAG=$tag" >> $env:GITHUB_ENV
@@ -148,7 +175,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
-          gh release create "$env:KIVO_TAG" "dist/Kivo-update.zip#Kivo update package" `
+          gh release create "$env:KIVO_TAG" `
+            "dist/Kivo-update.zip#Kivo update package" `
+            "dist/Kivo-update.sha256.txt#SHA-256 checksum" `
             --title "Kivo $env:KIVO_VERSION" `
             --generate-notes `
             --latest
