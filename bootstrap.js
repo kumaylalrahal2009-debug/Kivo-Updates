@@ -11,6 +11,7 @@ const CORE_PORT = Number(process.env.KIVO_CORE_PORT || (PUBLIC_PORT + 1));
 const DATA = path.resolve(process.env.KIVO_DATA_DIR || path.join(ROOT, 'data'));
 const DB_PATH = path.join(DATA, 'kivo.db');
 const CORE_SERVER = path.join(ROOT, 'server.js');
+const LOOPBACK_PRELOAD = path.join(ROOT, 'force-loopback.js');
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const STRIPE_PRICE_PRO_MONTHLY = process.env.STRIPE_PRICE_PRO_MONTHLY || '';
@@ -115,10 +116,13 @@ async function handlePremium(req,res,url){
 }
 
 const coreEnv={...process.env,PORT:String(CORE_PORT),KIVO_DATA_DIR:DATA,KIVO_UPLOAD_DIR:path.resolve(process.env.KIVO_UPLOAD_DIR||path.join(ROOT,'uploads'))};
-const core=spawn(process.execPath,['--no-warnings',CORE_SERVER],{cwd:ROOT,env:coreEnv,stdio:['ignore','inherit','inherit']});
+const coreArgs=['--no-warnings'];
+if(fs.existsSync(LOOPBACK_PRELOAD))coreArgs.push('-r',LOOPBACK_PRELOAD);
+coreArgs.push(CORE_SERVER);
+const core=spawn(process.execPath,coreArgs,{cwd:ROOT,env:coreEnv,stdio:['ignore','inherit','inherit']});
 core.on('exit',code=>{console.log(`Kivo core exited (${code??0}); closing bootstrap.`);process.exit(code??0);});
 
 function proxy(req,res){const options={hostname:'127.0.0.1',port:CORE_PORT,path:req.url,method:req.method,headers:{...req.headers,host:`127.0.0.1:${CORE_PORT}`}};const p=http.request(options,r=>{const headers={...r.headers};headers['cache-control']='no-store';res.writeHead(r.statusCode||500,headers);r.pipe(res);});p.on('error',()=>send(res,503,{error:'Kivo is starting. Try again in a moment.'}));req.pipe(p);}
 
 const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);const handled=await handlePremium(req,res,url);if(handled!==false)return;proxy(req,res);}catch(err){console.error('Kivo bootstrap:',err);if(!res.headersSent)send(res,500,{error:'Something went wrong.'});}});
-server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Experience Layer: http://localhost:${PUBLIC_PORT}\nCore server: http://localhost:${CORE_PORT}\nBilling: ${billingConfig().connected?'Stripe connected':'setup required'}\n`));
+server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Experience Layer: http://localhost:${PUBLIC_PORT}\nCore server: loopback only on 127.0.0.1:${CORE_PORT}\nBilling: ${billingConfig().connected?'Stripe connected':'setup required'}\n`));
