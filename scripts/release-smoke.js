@@ -8,16 +8,32 @@ const fail=msg=>{console.error(`KIVO RELEASE CHECK FAILED: ${msg}`);process.exit
 const ok=msg=>console.log(`✓ ${msg}`);
 
 const required=[
-  'server.js','core-runtime.js','force-loopback.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js',
-  'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css','public/manifest.json','public/sw.js',
+  'secure-gateway.js','server.js','core-runtime.js','force-loopback.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js',
+  'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css','public/money-intelligence.js','public/account-controls.js','public/manifest.json','public/sw.js',
   'start-kivo.bat','apply-update.ps1','.gitignore'
 ];
 for(const file of required){exists(file)?ok(`found ${file}`):fail(`missing ${file}`)}
 
+if(exists('secure-gateway.js')){
+  const gateway=read('secure-gateway.js');
+  /smart-experience-v2\.js/.test(gateway)?ok('security gateway launches Smart Experience v2'):fail('gateway does not launch Smart Experience v2');
+  /NODE_OPTIONS/.test(gateway)&&/force-loopback\.js/.test(gateway)?ok('gateway forces internal Node services onto loopback'):fail('gateway does not propagate loopback isolation');
+  /RateLimit-Limit/.test(gateway)&&/429/.test(gateway)?ok('public gateway has request rate limiting'):fail('public rate limiting is missing');
+  /Content-Security-Policy/.test(gateway)&&/X-Frame-Options/.test(gateway)?ok('public gateway sets browser security headers'):fail('browser security headers are missing');
+  /billing\/webhook/.test(gateway)&&/300/.test(gateway)?ok('Stripe webhook timestamp freshness check present'):fail('webhook replay freshness check missing');
+  /MAX_BODY_BYTES/.test(gateway)&&/413/.test(gateway)?ok('public request-size boundary present'):fail('request-size boundary missing');
+}
+
 if(exists('start-kivo.bat')){
   const start=read('start-kivo.bat');
-  /smart-experience-v2\.js/i.test(start)?ok('launcher uses Smart Experience v2'):fail('start-kivo.bat does not launch smart-experience-v2.js');
+  /secure-gateway\.js/i.test(start)?ok('Windows launcher uses security gateway'):fail('start-kivo.bat bypasses the security gateway');
   /KIVO_UPDATE_REPO/i.test(start)?ok('launcher configures update repository'):fail('launcher does not configure update repository');
+}
+
+if(exists('Dockerfile')){
+  const docker=read('Dockerfile');
+  /secure-gateway\.js/.test(docker)?ok('Docker launches security gateway'):fail('Docker bypasses the security gateway');
+  /USER node/.test(docker)?ok('Docker runs Kivo as non-root node user'):fail('Docker does not drop root privileges');
 }
 
 if(exists('bootstrap.js')){
@@ -32,6 +48,7 @@ if(exists('core-runtime.js')){
   const runtime=read('core-runtime.js');
   /KIVO_CORE_ADMIN_PASSWORD/.test(runtime)?ok('core runtime injects private internal admin password'):fail('core runtime does not inject private admin credential');
   /ADMIN_PASSWORD/.test(runtime)&&/replace/.test(runtime)?ok('legacy starter admin constant is overridden in memory'):fail('legacy admin constant override missing');
+  /api\/account\/export/.test(runtime)&&/api\/account\/password/.test(runtime)?ok('account privacy APIs are injected into secure runtime'):fail('account privacy APIs missing from secure runtime');
 }
 
 if(exists('smart-experience-v2.js')){
@@ -49,6 +66,7 @@ if(exists('lib/update-engine.js')){
   const engine=read('lib/update-engine.js');
   /releases\/latest/.test(engine)&&/releases\?per_page/.test(engine)?ok('updater has multiple release discovery paths'):fail('updater does not have multiple release discovery paths');
   /Kivo-update\.zip/.test(engine)?ok('updater has release-asset fallback'):fail('update asset fallback missing');
+  /sha256|SHA-256|createHash\('sha256'\)/i.test(engine)?ok('updater verifies release integrity'):fail('update SHA-256 verification missing');
   /30000/.test(engine)?ok('update download timeout present'):fail('update download timeout missing');
 }
 
@@ -66,6 +84,8 @@ if(exists('public/index.html')){
   for(const id of ['app','homeView','inboxView','moneyView','askView','chat','askInput','captureText','settingsDialog','adminDashboard']){
     html.includes(`id="${id}"`)?ok(`UI anchor #${id} exists`):fail(`required UI anchor #${id} missing`);
   }
+  /money-intelligence\.js/.test(html)?ok('Money Intelligence loads in the live app'):fail('Money Intelligence is not loaded by index.html');
+  /account-controls\.js/.test(html)?ok('account controls load in the live app'):fail('account controls are not loaded by index.html');
 }
 
 if(exists('public/smart-client.js')){
@@ -77,7 +97,7 @@ if(exists('public/smart-client.js')){
   /inboxFilterBar/.test(client)?ok('inbox search/filter present'):fail('inbox search/filter missing');
   /kivoFocusCard/.test(client)?ok('priority focus card present'):fail('priority focus card missing');
   /assistant\/history/.test(client)?ok('Ask Kivo persistent history controls present'):fail('Ask Kivo history controls missing');
-  /exportKivoData/.test(client)?ok('user data export control present'):fail('user export control missing');
+  /exportKivoData/.test(client)?ok('user data export shortcut present'):fail('user export shortcut missing');
 }
 
 if(exists('public/sw.js')){
@@ -86,7 +106,7 @@ if(exists('public/sw.js')){
   /app\.js/.test(sw)&&/styles\.css/.test(sw)?ok('PWA keeps live app bundles out of cache'):fail('PWA may hide app updates behind cached bundles');
 }
 
-const secretScanFiles=['bootstrap.js','core-runtime.js','experience.js','smart-experience-v2.js','lib/update-engine.js','public/app.js','public/premium.js','public/smart-client.js'];
+const secretScanFiles=['secure-gateway.js','bootstrap.js','core-runtime.js','experience.js','smart-experience-v2.js','lib/update-engine.js','public/app.js','public/premium.js','public/smart-client.js','public/account-controls.js'];
 for(const file of secretScanFiles){
   if(!exists(file))continue;
   const text=read(file);
@@ -94,12 +114,12 @@ for(const file of secretScanFiles){
 }
 ok('no obvious real payment secrets embedded in official application path');
 
-for(const privatePath of ['data/kivo.db','.env','business-config.bat']){
+for(const privatePath of ['data/kivo.db','.env','business-config.bat','owner-login.txt']){
   if(exists(privatePath))fail(`private runtime file should not be committed: ${privatePath}`);
 }
 ok('private runtime files are absent from release source');
 
-for(const rel of ['public/app.js','public/styles.css','public/smart-client.js','public/smart-ui.css']){
+for(const rel of ['public/app.js','public/styles.css','public/smart-client.js','public/smart-ui.css','public/money-intelligence.js','public/account-controls.js']){
   if(exists(rel)&&fs.statSync(path.join(root,rel)).size<100)fail(`${rel} is unexpectedly tiny`);
 }
 
