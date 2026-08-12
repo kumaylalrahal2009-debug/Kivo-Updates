@@ -8,7 +8,7 @@ const fail=msg=>{console.error(`KIVO RELEASE CHECK FAILED: ${msg}`);process.exit
 const ok=msg=>console.log(`✓ ${msg}`);
 
 const required=[
-  'server.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js',
+  'server.js','core-runtime.js','force-loopback.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js',
   'public/index.html','public/app.js','public/styles.css','public/premium.js','public/premium.css','public/smart-client.js','public/smart-ui.css','public/manifest.json','public/sw.js',
   'start-kivo.bat','apply-update.ps1','.gitignore'
 ];
@@ -18,6 +18,20 @@ if(exists('start-kivo.bat')){
   const start=read('start-kivo.bat');
   /smart-experience-v2\.js/i.test(start)?ok('launcher uses Smart Experience v2'):fail('start-kivo.bat does not launch smart-experience-v2.js');
   /KIVO_UPDATE_REPO/i.test(start)?ok('launcher configures update repository'):fail('launcher does not configure update repository');
+}
+
+if(exists('bootstrap.js')){
+  const boot=read('bootstrap.js');
+  /core-runtime\.js/.test(boot)?ok('bootstrap launches secure core runtime'):fail('bootstrap still launches the legacy core directly');
+  /force-loopback\.js/.test(boot)?ok('bootstrap preloads loopback isolation'):fail('loopback isolation preload is missing');
+  /KIVO_ADMIN_PASSWORD/.test(boot)?ok('owner admin uses private configuration'):fail('private owner admin configuration is missing');
+  /KIVO_CORE_ADMIN_PASSWORD/.test(boot)&&/randomBytes/.test(boot)?ok('internal admin credential is randomized per process'):fail('internal admin credential is not randomized');
+}
+
+if(exists('core-runtime.js')){
+  const runtime=read('core-runtime.js');
+  /KIVO_CORE_ADMIN_PASSWORD/.test(runtime)?ok('core runtime injects private internal admin password'):fail('core runtime does not inject private admin credential');
+  /ADMIN_PASSWORD/.test(runtime)&&/replace/.test(runtime)?ok('legacy starter admin constant is overridden in memory'):fail('legacy admin constant override missing');
 }
 
 if(exists('smart-experience-v2.js')){
@@ -43,6 +57,8 @@ if(exists('apply-update.ps1')){
   for(const protectedName of ['data','uploads','updates','backups','business-config.bat']){
     updater.toLowerCase().includes(protectedName.toLowerCase())?ok(`updater references protected ${protectedName}`):fail(`updater does not protect/reference ${protectedName}`);
   }
+  /Restore-Rollback/.test(updater)?ok('failed updates have rollback recovery'):fail('update rollback recovery missing');
+  /JavaScript validation failed/.test(updater)?ok('update package is syntax-checked before install'):fail('pre-install JS validation missing');
 }
 
 if(exists('public/index.html')){
@@ -60,6 +76,8 @@ if(exists('public/smart-client.js')){
   /firstRunGuide/.test(client)?ok('new-user onboarding present'):fail('new-user onboarding missing');
   /inboxFilterBar/.test(client)?ok('inbox search/filter present'):fail('inbox search/filter missing');
   /kivoFocusCard/.test(client)?ok('priority focus card present'):fail('priority focus card missing');
+  /assistant\/history/.test(client)?ok('Ask Kivo persistent history controls present'):fail('Ask Kivo history controls missing');
+  /exportKivoData/.test(client)?ok('user data export control present'):fail('user export control missing');
 }
 
 if(exists('public/sw.js')){
@@ -68,13 +86,13 @@ if(exists('public/sw.js')){
   /app\.js/.test(sw)&&/styles\.css/.test(sw)?ok('PWA keeps live app bundles out of cache'):fail('PWA may hide app updates behind cached bundles');
 }
 
-const secretScanFiles=['server.js','bootstrap.js','experience.js','smart-experience-v2.js','lib/update-engine.js','public/app.js','public/premium.js','public/smart-client.js'];
+const secretScanFiles=['bootstrap.js','core-runtime.js','experience.js','smart-experience-v2.js','lib/update-engine.js','public/app.js','public/premium.js','public/smart-client.js'];
 for(const file of secretScanFiles){
   if(!exists(file))continue;
   const text=read(file);
   if(/sk_live_[A-Za-z0-9]+|sk_test_[A-Za-z0-9]{12,}|whsec_[A-Za-z0-9]{12,}/.test(text))fail(`possible real secret embedded in ${file}`);
 }
-ok('no obvious real payment secrets embedded in application code');
+ok('no obvious real payment secrets embedded in official application path');
 
 for(const privatePath of ['data/kivo.db','.env','business-config.bat']){
   if(exists(privatePath))fail(`private runtime file should not be committed: ${privatePath}`);
