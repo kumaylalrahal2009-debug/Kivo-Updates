@@ -1,4 +1,5 @@
 const http=require('node:http');
+const fs=require('node:fs');
 const path=require('node:path');
 const {spawn}=require('node:child_process');
 
@@ -71,7 +72,7 @@ function rateLimit(req,res,url){
 function webhookTimestampFresh(req,url){
   if(req.method!=='POST'||url.pathname!=='/api/billing/webhook')return true;
   const header=String(req.headers['stripe-signature']||'');
-  const match=header.match(/(?:^|,)t=(\d+)(?:,|$)/);if(!match)return true; // bootstrap still performs full signature validation
+  const match=header.match(/(?:^|,)t=(\d+)(?:,|$)/);if(!match)return true;
   const stamp=Number(match[1]);if(!Number.isFinite(stamp))return false;
   return Math.abs(Math.floor(Date.now()/1000)-stamp)<=300;
 }
@@ -80,10 +81,15 @@ function copyResponseHeaders(req,headers){
   delete out['server'];delete out['x-powered-by'];
   return out;
 }
-function proxyBuffered(req,res,body){
-  const headers={...req.headers,host:`127.0.0.1:${APP_PORT}`,'content-length':String(body.length)};
-  delete headers['transfer-encoding'];delete headers['connection'];delete headers['proxy-connection'];
+function forwardedHeaders(req){
+  const headers={...req.headers,host:`127.0.0.1:${APP_PORT}`};
+  delete headers['connection'];delete headers['proxy-connection'];
   headers['x-forwarded-for']=clientIp(req);headers['x-forwarded-proto']=isSecure(req)?'https':'http';
+  return headers;
+}
+function proxyBuffered(req,res,body){
+  const headers={...forwardedHeaders(req),'content-length':String(body.length)};
+  delete headers['transfer-encoding'];
   const p=http.request({hostname:'127.0.0.1',port:APP_PORT,path:req.url,method:req.method,headers},inner=>{
     res.writeHead(inner.statusCode||500,copyResponseHeaders(req,inner.headers));inner.pipe(res);
   });
@@ -91,14 +97,27 @@ function proxyBuffered(req,res,body){
   p.end(body);
 }
 function proxyStreaming(req,res){
-  const headers={...req.headers,host:`127.0.0.1:${APP_PORT}`};
-  delete headers['connection'];delete headers['proxy-connection'];
-  headers['x-forwarded-for']=clientIp(req);headers['x-forwarded-proto']=isSecure(req)?'https':'http';
-  const p=http.request({hostname:'127.0.0.1',port:APP_PORT,path:req.url,method:req.method,headers},inner=>{
+  const p=http.request({hostname:'127.0.0.1',port:APP_PORT,path:req.url,method:req.method,headers:forwardedHeaders(req)},inner=>{
     res.writeHead(inner.statusCode||500,copyResponseHeaders(req,inner.headers));inner.pipe(res);
   });
   p.on('error',()=>json(res,503,{error:'Kivo is starting. Try again in a moment.'}));
   req.pipe(p);
+}
+function proxyAppBundle(req,res){
+  const p=http.request({hostname:'127.0.0.1',port:APP_PORT,path:req.url,method:'GET',headers:forwardedHeaders(req)},inner=>{
+    const chunks=[];inner.on('data',c=>chunks.push(c));inner.on('end',()=>{
+      let body=Buffer.concat(chunks);
+      if((inner.statusCode||500)===200){
+        try{
+          const additions=['money-intelligence.js','account-controls.js'].map(name=>fs.readFileSync(path.join(ROOT,'public',name),'utf8')).join('\n\n');
+          body=Buffer.from(body.toString('utf8')+'\n\n'+additions,'utf8');
+        }catch(err){return json(res,500,{error:`Kivo app extension is missing: ${err.message}`})}
+      }
+      const headers=copyResponseHeaders(req,inner.headers);delete headers['content-encoding'];delete headers['transfer-encoding'];headers['content-type']='application/javascript; charset=utf-8';headers['cache-control']='no-store, max-age=0';headers['content-length']=String(body.length);
+      res.writeHead(inner.statusCode||500,headers);res.end(body);
+    });
+  });
+  p.on('error',()=>json(res,503,{error:'Kivo is starting. Try again in a moment.'}));p.end();
 }
 async function readBody(req){
   const declared=Number(req.headers['content-length']||0);if(declared>MAX_BODY_BYTES)throw Object.assign(new Error('too_large'),{code:'too_large'});
@@ -118,6 +137,7 @@ const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);
     if(rateLimit(req,res,url))return;
     if(!webhookTimestampFresh(req,url))return json(res,400,{error:'Stripe webhook timestamp is too old or too far in the future.'});
+    if(req.method==='GET'&&url.pathname==='/app.js')return proxyAppBundle(req,res);
     const method=req.method||'GET';
     if(['POST','PUT','PATCH','DELETE'].includes(method)){
       const body=await readBody(req);return proxyBuffered(req,res,body);
