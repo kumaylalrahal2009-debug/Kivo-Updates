@@ -24,7 +24,7 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 26
+    timeout-minutes: 30
 
     steps:
       - name: Get Kivo source
@@ -44,6 +44,7 @@ jobs:
           node --check smart-experience-v2.js
           node --check lib/update-engine.js
           node --check lib/account-service.js
+          node --check lib/capture-parser.js
           node --check public/app.js
           node --check public/premium.js
           node --check public/smart-client.js
@@ -52,12 +53,13 @@ jobs:
           node --check public/sw.js
           node --check scripts/release-smoke.js
           node --check scripts/capture-parser-smoke.js
-          node --check scripts/integration-smoke.js
+          node --check scripts/security-gateway-smoke.js
           node --check scripts/update-integrity-smoke.js
+          node --check scripts/integration-smoke.js
           node --check scripts/account-lifecycle-smoke.js
           node --check scripts/user-isolation-smoke.js
           node --check scripts/billing-webhook-smoke.js
-          node --check scripts/security-gateway-smoke.js
+          node --check scripts/concurrency-smoke.js
           node scripts/release-smoke.js
 
           $required = @(
@@ -70,6 +72,7 @@ jobs:
             "smart-experience-v2.js",
             "lib/update-engine.js",
             "lib/account-service.js",
+            "lib/capture-parser.js",
             "public/index.html",
             "public/app.js",
             "public/styles.css",
@@ -87,12 +90,13 @@ jobs:
             "show-owner-login.bat",
             "scripts/release-smoke.js",
             "scripts/capture-parser-smoke.js",
-            "scripts/integration-smoke.js",
+            "scripts/security-gateway-smoke.js",
             "scripts/update-integrity-smoke.js",
+            "scripts/integration-smoke.js",
             "scripts/account-lifecycle-smoke.js",
             "scripts/user-isolation-smoke.js",
             "scripts/billing-webhook-smoke.js",
-            "scripts/security-gateway-smoke.js"
+            "scripts/concurrency-smoke.js"
           )
           foreach ($item in $required) {
             if (-not (Test-Path $item)) { throw "Required Kivo file missing: $item" }
@@ -144,6 +148,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           node scripts/billing-webhook-smoke.js
+
+      - name: Pressure test multi-service SQLite concurrency
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/concurrency-smoke.js
 
       - name: Build and inspect update package
         shell: pwsh
@@ -198,6 +208,7 @@ jobs:
             account_lifecycle_tested = $true
             user_isolation_tested = $true
             billing_lifecycle_tested = $true
+            concurrency_tested = $true
             checksum = "sha256"
             built_at = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json | Set-Content dist\package\version.json -Encoding UTF8
@@ -217,6 +228,7 @@ jobs:
             "smart-experience-v2.js",
             "lib\update-engine.js",
             "lib\account-service.js",
+            "lib\capture-parser.js",
             "public\index.html",
             "public\app.js",
             "public\smart-client.js",
