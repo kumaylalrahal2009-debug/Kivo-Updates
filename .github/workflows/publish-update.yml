@@ -24,7 +24,7 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 24
 
     steps:
       - name: Get Kivo source
@@ -34,6 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          node --check secure-gateway.js
           node --check server.js
           node --check core-runtime.js
           node --check force-loopback.js
@@ -54,9 +55,11 @@ jobs:
           node --check scripts/account-lifecycle-smoke.js
           node --check scripts/isolation-smoke.js
           node --check scripts/billing-smoke.js
+          node --check scripts/security-gateway-smoke.js
           node scripts/release-smoke.js
 
           $required = @(
+            "secure-gateway.js",
             "server.js",
             "core-runtime.js",
             "force-loopback.js",
@@ -84,7 +87,8 @@ jobs:
             "scripts/update-integrity-smoke.js",
             "scripts/account-lifecycle-smoke.js",
             "scripts/isolation-smoke.js",
-            "scripts/billing-smoke.js"
+            "scripts/billing-smoke.js",
+            "scripts/security-gateway-smoke.js"
           )
           foreach ($item in $required) {
             if (-not (Test-Path $item)) { throw "Required Kivo file missing: $item" }
@@ -94,6 +98,12 @@ jobs:
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "ensure-local-config.ps1"), [ref]$tokens, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count -gt 0) { throw "ensure-local-config.ps1 failed PowerShell parsing." }
+
+      - name: Attack public security gateway
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/security-gateway-smoke.js
 
       - name: Test update integrity engine
         shell: pwsh
@@ -135,6 +145,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist\package | Out-Null
 
           $items = @(
+            "secure-gateway.js",
             "server.js",
             "core-runtime.js",
             "force-loopback.js",
@@ -166,6 +177,8 @@ jobs:
             update_repo = "${{ github.repository }}"
             release = $tag
             commit = "${{ github.sha }}"
+            security_gateway = $true
+            security_gateway_tested = $true
             smart_experience = "v2"
             update_engine = "v2"
             secure_core = $true
@@ -186,6 +199,7 @@ jobs:
           foreach ($relative in @(
             "version.json",
             "start-kivo.bat",
+            "secure-gateway.js",
             "bootstrap.js",
             "core-runtime.js",
             "force-loopback.js",
