@@ -1,13 +1,34 @@
 services:
   kivo:
     build: .
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      KIVO_ADMIN_EMAIL: "owner@example.com"
-      KIVO_ADMIN_PASSWORD: "CHANGE-THIS-BEFORE-DEPLOY"
-      SECURE_COOKIES: "false"
+      PORT: "8080"
+      KIVO_DATA_DIR: "/data"
+      KIVO_UPLOAD_DIR: "/data/uploads"
+      KIVO_PUBLIC_URL: "${KIVO_PUBLIC_URL:-http://localhost:8080}"
+      KIVO_ADMIN_EMAIL: "${KIVO_ADMIN_EMAIL:-owner@kivo.local}"
+      KIVO_ADMIN_PASSWORD: "${KIVO_ADMIN_PASSWORD:?Set KIVO_ADMIN_PASSWORD in your private .env file}"
+      KIVO_AI_MODEL: "${KIVO_AI_MODEL:-gpt-5-mini}"
+      KIVO_AI_TIMEOUT_MS: "${KIVO_AI_TIMEOUT_MS:-8500}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+      STRIPE_PRICE_PRO_MONTHLY: "${STRIPE_PRICE_PRO_MONTHLY:-}"
+      STRIPE_PRICE_PRO_YEARLY: "${STRIPE_PRICE_PRO_YEARLY:-}"
+      KIVO_PRO_MONTHLY_AUD: "${KIVO_PRO_MONTHLY_AUD:-7.99}"
+      KIVO_PRO_YEARLY_AUD: "${KIVO_PRO_YEARLY_AUD:-59.99}"
+      SECURE_COOKIES: "${SECURE_COOKIES:-false}"
     volumes:
       - kivo-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/admin/me').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 volumes:
   kivo-data:
