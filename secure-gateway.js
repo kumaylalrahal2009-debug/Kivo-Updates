@@ -11,11 +11,33 @@ const APP_PORT=Number(process.env.KIVO_GATEWAY_INNER_PORT||(PUBLIC_PORT+8));
 const DATA=path.resolve(process.env.KIVO_DATA_DIR||path.join(ROOT,'data'));
 const UPLOADS=path.resolve(process.env.KIVO_UPLOAD_DIR||path.join(ROOT,'uploads'));
 const UPDATE_REPO=process.env.KIVO_UPDATE_REPO||'kumaylalrahal2009-debug/Kivo-Updates';
+const STRIPE_SECRET_KEY=process.env.STRIPE_SECRET_KEY||'';
+const STRIPE_API_BASE=String(process.env.KIVO_STRIPE_API_BASE||'https://api.stripe.com/v1').replace(/\/$/,'');
 const LOCAL_DESKTOP=String(process.env.KIVO_LOCAL_DESKTOP||'false').toLowerCase()==='true';
 const MAX_BODY_BYTES=Math.max(1024*1024,Number(process.env.KIVO_MAX_REQUEST_BYTES||8*1024*1024));
 const LOOPBACK_PRELOAD='./force-loopback.js';
 fs.mkdirSync(DATA,{recursive:true});fs.mkdirSync(UPLOADS,{recursive:true});
-const accountService=createAccountService({dataDir:DATA,uploadsDir:UPLOADS,secureCookies:String(process.env.SECURE_COOKIES||'false').toLowerCase()==='true'});
+
+async function cancelPaidSubscription({membership}){
+  const subscriptionId=String(membership?.stripe_subscription_id||'').trim();if(!subscriptionId)return;
+  if(!STRIPE_SECRET_KEY){
+    const err=new Error('Your Kivo Pro subscription is still active, but billing is not connected right now. Your account was not deleted. Cancel Pro first or restore the Stripe connection and try again.');err.statusCode=409;throw err;
+  }
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const r=await fetch(`${STRIPE_API_BASE}/subscriptions/${encodeURIComponent(subscriptionId)}`,{method:'DELETE',signal:controller.signal,headers:{Authorization:`Bearer ${STRIPE_SECRET_KEY}`,'User-Agent':'Kivo-Account-Deletion','Content-Type':'application/x-www-form-urlencoded'}});
+    const text=await r.text();let data={};try{data=JSON.parse(text)}catch{}
+    if(r.status===404)return;
+    if(!r.ok){const err=new Error(`Kivo could not cancel your active Pro subscription (${r.status}). Your account was not deleted.`);err.statusCode=502;throw err;}
+    const status=String(data?.status||'canceled').toLowerCase();
+    if(!['canceled','cancelled'].includes(status)){const err=new Error('Stripe did not confirm that your Kivo Pro subscription was cancelled. Your account was not deleted.');err.statusCode=502;throw err;}
+  }catch(err){
+    if(err?.name==='AbortError'){const timeoutErr=new Error('Stripe took too long to confirm subscription cancellation. Your account was not deleted.');timeoutErr.statusCode=504;throw timeoutErr;}
+    throw err;
+  }finally{clearTimeout(timer)}
+}
+
+const accountService=createAccountService({dataDir:DATA,uploadsDir:UPLOADS,secureCookies:String(process.env.SECURE_COOKIES||'false').toLowerCase()==='true',beforeDelete:cancelPaidSubscription});
 const updater=createUpdateEngine({root:ROOT,repo:UPDATE_REPO,localDesktop:LOCAL_DESKTOP});
 const buckets=new Map();
 let plannedShutdown=false;
@@ -202,7 +224,7 @@ const server=http.createServer(async(req,res)=>{
 server.requestTimeout=30000;
 server.headersTimeout=15000;
 server.keepAliveTimeout=5000;
-server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Security Gateway: http://localhost:${PUBLIC_PORT}\nProtected Smart v2: 127.0.0.1:${APP_PORT}\nRate limits, hardened headers, account privacy controls, gateway-owned updates, request limits and webhook replay protection enabled.\n`));
+server.listen(PUBLIC_PORT,()=>console.log(`\nKivo Security Gateway: http://localhost:${PUBLIC_PORT}\nProtected Smart v2: 127.0.0.1:${APP_PORT}\nRate limits, hardened headers, billing-safe account deletion, account privacy controls, gateway-owned updates, request limits and webhook replay protection enabled.\n`));
 
 function stopInnerTree(){
   if(!child||child.exitCode!==null)return;
