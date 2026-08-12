@@ -1,10 +1,17 @@
 {
+  "id": "/app",
   "name": "Kivo — Life, handled.",
   "short_name": "Kivo",
-  "start_url": "/",
+  "description": "Personal life admin for reminders, recurring charges, deadlines and everyday tasks.",
+  "start_url": "/app?source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait-primary",
   "background_color": "#09111f",
   "theme_color": "#0c1222",
-  "description": "Personal life admin with a premium mobile interface.",
-  "icons": [{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "categories": ["productivity", "finance", "utilities"],
+  "icons": [
+    {"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
 }
