@@ -43,6 +43,7 @@ jobs:
           node --check smart-experience.js
           node --check smart-experience-v2.js
           node --check lib/update-engine.js
+          node --check lib/account-service.js
           node --check public/app.js
           node --check public/premium.js
           node --check public/smart-client.js
@@ -53,8 +54,8 @@ jobs:
           node --check scripts/integration-smoke.js
           node --check scripts/update-integrity-smoke.js
           node --check scripts/account-lifecycle-smoke.js
-          node --check scripts/isolation-smoke.js
-          node --check scripts/billing-smoke.js
+          node --check scripts/user-isolation-smoke.js
+          node --check scripts/billing-webhook-smoke.js
           node --check scripts/security-gateway-smoke.js
           node scripts/release-smoke.js
 
@@ -67,6 +68,7 @@ jobs:
             "experience.js",
             "smart-experience-v2.js",
             "lib/update-engine.js",
+            "lib/account-service.js",
             "public/index.html",
             "public/app.js",
             "public/styles.css",
@@ -86,8 +88,8 @@ jobs:
             "scripts/integration-smoke.js",
             "scripts/update-integrity-smoke.js",
             "scripts/account-lifecycle-smoke.js",
-            "scripts/isolation-smoke.js",
-            "scripts/billing-smoke.js",
+            "scripts/user-isolation-smoke.js",
+            "scripts/billing-webhook-smoke.js",
             "scripts/security-gateway-smoke.js"
           )
           foreach ($item in $required) {
@@ -127,13 +129,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          node scripts/isolation-smoke.js
+          node scripts/user-isolation-smoke.js
 
       - name: Test subscription and revenue lifecycle
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          node scripts/billing-smoke.js
+          node scripts/billing-webhook-smoke.js
 
       - name: Build and inspect update package
         shell: pwsh
@@ -205,6 +207,7 @@ jobs:
             "force-loopback.js",
             "smart-experience-v2.js",
             "lib\update-engine.js",
+            "lib\account-service.js",
             "public\index.html",
             "public\app.js",
             "public\smart-client.js",
