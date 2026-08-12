@@ -11,20 +11,26 @@ on:
       - "backups/**"
   workflow_dispatch:
 
+concurrency:
+  group: kivo-latest-release
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
   publish:
     runs-on: windows-latest
+    timeout-minutes: 10
 
     steps:
       - name: Get Kivo source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Validate Kivo Smart Experience
+      - name: Validate Kivo
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           node --check server.js
           node --check bootstrap.js
           node --check experience.js
@@ -33,9 +39,29 @@ jobs:
           node --check public/premium.js
           node --check public/smart-client.js
 
+          $required = @(
+            "server.js",
+            "bootstrap.js",
+            "experience.js",
+            "smart-experience.js",
+            "public/index.html",
+            "public/app.js",
+            "public/styles.css",
+            "public/premium.js",
+            "public/premium.css",
+            "public/smart-client.js",
+            "public/smart-ui.css",
+            "start-kivo.bat",
+            "apply-update.ps1"
+          )
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) { throw "Required Kivo file missing: $item" }
+          }
+
       - name: Build update package
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $version = "1.0.${{ github.run_number }}"
           $tag = "v$version"
 
@@ -58,18 +84,19 @@ jobs:
           )
 
           foreach ($item in $items) {
-            if (Test-Path $item) {
-              Copy-Item $item dist\package -Recurse -Force
-            }
+            if (Test-Path $item) { Copy-Item $item dist\package -Recurse -Force }
           }
 
           @{
             version = $version
             update_repo = "${{ github.repository }}"
             release = $tag
+            commit = "${{ github.sha }}"
+            built_at = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json | Set-Content dist\package\version.json -Encoding UTF8
 
           Compress-Archive -Path dist\package\* -DestinationPath dist\Kivo-update.zip -Force
+          if ((Get-Item dist\Kivo-update.zip).Length -lt 1024) { throw "Kivo update package is unexpectedly small." }
 
           "KIVO_VERSION=$version" >> $env:GITHUB_ENV
           "KIVO_TAG=$tag" >> $env:GITHUB_ENV
@@ -79,6 +106,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $ErrorActionPreference = "Stop"
           gh release create "$env:KIVO_TAG" "dist/Kivo-update.zip#Kivo update package" `
             --title "Kivo $env:KIVO_VERSION" `
             --generate-notes `
