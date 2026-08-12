@@ -24,7 +24,7 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
 
     steps:
       - name: Get Kivo source
@@ -45,9 +45,15 @@ jobs:
           node --check public/app.js
           node --check public/premium.js
           node --check public/smart-client.js
+          node --check public/money-intelligence.js
+          node --check public/account-controls.js
           node --check public/sw.js
+          node --check scripts/release-smoke.js
           node --check scripts/integration-smoke.js
           node --check scripts/update-integrity-smoke.js
+          node --check scripts/account-lifecycle-smoke.js
+          node --check scripts/isolation-smoke.js
+          node --check scripts/billing-smoke.js
           node scripts/release-smoke.js
 
           $required = @(
@@ -65,14 +71,20 @@ jobs:
             "public/premium.css",
             "public/smart-client.js",
             "public/smart-ui.css",
+            "public/money-intelligence.js",
+            "public/account-controls.js",
             "public/manifest.json",
             "public/sw.js",
             "start-kivo.bat",
             "apply-update.ps1",
             "ensure-local-config.ps1",
             "show-owner-login.bat",
+            "scripts/release-smoke.js",
             "scripts/integration-smoke.js",
-            "scripts/update-integrity-smoke.js"
+            "scripts/update-integrity-smoke.js",
+            "scripts/account-lifecycle-smoke.js",
+            "scripts/isolation-smoke.js",
+            "scripts/billing-smoke.js"
           )
           foreach ($item in $required) {
             if (-not (Test-Path $item)) { throw "Required Kivo file missing: $item" }
@@ -94,6 +106,24 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           node scripts/integration-smoke.js
+
+      - name: Test account and privacy lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/account-lifecycle-smoke.js
+
+      - name: Attack cross-user data isolation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/isolation-smoke.js
+
+      - name: Test subscription and revenue lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node scripts/billing-smoke.js
 
       - name: Build and inspect update package
         shell: pwsh
@@ -141,6 +171,9 @@ jobs:
             secure_core = $true
             first_run_owner_setup = $true
             e2e_tested = $true
+            account_lifecycle_tested = $true
+            user_isolation_tested = $true
+            billing_lifecycle_tested = $true
             checksum = "sha256"
             built_at = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json | Set-Content dist\package\version.json -Encoding UTF8
@@ -161,6 +194,8 @@ jobs:
             "public\index.html",
             "public\app.js",
             "public\smart-client.js",
+            "public\money-intelligence.js",
+            "public\account-controls.js",
             "public\sw.js"
           )) {
             if (-not (Test-Path (Join-Path $verify $relative))) { throw "Final release ZIP is missing $relative" }
