@@ -15,7 +15,7 @@ let output='';
 
 function log(s){console.log(`✓ ${s}`)}
 function fail(s,extra=''){throw new Error(`${s}${extra?`\n${extra}`:''}`)}
-async function request(url,opt={}){const r=await fetch(base+url,opt);const text=await r.text();let body=text;try{body=JSON.parse(text)}catch{}return{r,body}}
+async function request(url,opt={}){const r=await fetch(base+url,opt);const text=await r.text();let body=text;try{body=JSON.parse(text)}catch{}return{r,body,text}}
 async function waitReady(){const start=Date.now();while(Date.now()-start<30000){try{const x=await request('/api/admin/me');if(x.r.status===200)return}catch{}await new Promise(r=>setTimeout(r,300))}fail('security gateway never became ready',output.slice(-7000))}
 function stopTree(child){if(!child||child.exitCode!==null)return;try{if(process.platform==='win32')spawnSync('taskkill',['/pid',String(child.pid),'/t','/f'],{stdio:'ignore'});else child.kill('SIGTERM')}catch{}}
 
@@ -36,13 +36,19 @@ child.stdout.on('data',d=>{output+=d;process.stdout.write(d)});child.stderr.on('
   if(home.r.headers.get('x-content-type-options')!=='nosniff')fail('nosniff header is missing');
   log('public responses receive hardened browser security headers');
 
+  const appBundle=await request('/app.js?security-test=1');
+  if(appBundle.r.status!==200)fail(`public app bundle returned ${appBundle.r.status}`);
+  if(!appBundle.text.includes('MONEY INTELLIGENCE')||!appBundle.text.includes('moneyIntelligence'))fail('Money Intelligence is not present in the live /app.js bundle');
+  if(!appBundle.text.includes('ACCOUNT & PRIVACY')||!appBundle.text.includes('accountControlsCard'))fail('Account Controls are not present in the live /app.js bundle');
+  log('Money Intelligence and Account Controls are actually delivered to the browser');
+
   const stale=Math.floor(Date.now()/1000)-3600;
   const oldWebhook=await request('/api/billing/webhook',{method:'POST',headers:{'Content-Type':'application/json','Stripe-Signature':`t=${stale},v1=deadbeef`},body:'{}'});
   if(oldWebhook.r.status!==400||!/timestamp/i.test(String(oldWebhook.body?.error||oldWebhook.body)))fail('stale Stripe webhook timestamp was not rejected',JSON.stringify(oldWebhook.body));
   log('stale Stripe webhook replay is rejected before business logic');
 
   const huge='x'.repeat(1024*1024+2048);
-  const tooLarge=await request('/api/account/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:huge})});
+  const tooLarge=await request('/api/account/profile',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:huge})});
   if(tooLarge.r.status!==413)fail(`oversized request expected 413, got ${tooLarge.r.status}`,JSON.stringify(tooLarge.body).slice(0,500));
   log('oversized mutating requests are rejected at the public boundary');
 
