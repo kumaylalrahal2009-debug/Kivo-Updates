@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths:
+      - "secure-gateway.js"
+      - "lib/account-service.js"
       - "server.js"
-      - "core-runtime.js"
       - "bootstrap.js"
       - "experience.js"
       - "smart-experience-v2.js"
@@ -23,7 +24,7 @@ permissions:
 jobs:
   isolate-users:
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Get Kivo source
         uses: actions/checkout@v5
@@ -31,7 +32,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          node --check core-runtime.js
+          node --check secure-gateway.js
+          node --check lib/account-service.js
           node --check smart-experience-v2.js
           node --check scripts/user-isolation-smoke.js
       - name: Attack account boundaries on temporary data
