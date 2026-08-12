@@ -17,14 +17,19 @@ const {createUpdateEngine}=require('../lib/update-engine');
   const port=server.address().port;
   const engine=createUpdateEngine({root:temp,repo:'example/example',localDesktop:false});
   try{
+    let missingRejected=false;
+    try{await engine.verifyChecksum(file,null)}catch(err){missingRejected=/required SHA-256 checksum/i.test(err.message)}
+    if(!missingRejected)throw new Error('Checksum-less Kivo update was not rejected.');
+    console.log('✓ checksum-less Kivo update rejected');
+
     const good=await engine.verifyChecksum(file,`http://127.0.0.1:${port}/checksum.txt`);
     if(!good.verified||good.digest!==digest)throw new Error('Valid update checksum was not accepted.');
     console.log('✓ valid Kivo update checksum accepted');
 
     fs.appendFileSync(file,'tampered');
-    let rejected=false;
-    try{await engine.verifyChecksum(file,`http://127.0.0.1:${port}/checksum.txt`)}catch(err){rejected=/SHA-256 verification/i.test(err.message)}
-    if(!rejected)throw new Error('Tampered Kivo update was not rejected.');
+    let tamperedRejected=false;
+    try{await engine.verifyChecksum(file,`http://127.0.0.1:${port}/checksum.txt`)}catch(err){tamperedRejected=/SHA-256 verification/i.test(err.message)}
+    if(!tamperedRejected)throw new Error('Tampered Kivo update was not rejected.');
     console.log('✓ tampered Kivo update rejected');
     console.log('\nKivo update integrity smoke test passed.');
   }finally{
